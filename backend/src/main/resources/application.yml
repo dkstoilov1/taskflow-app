@@ -1,0 +1,53 @@
+spring:
+  application:
+    name: taskflow-backend
+  datasource:
+    url: "${TASKFLOW_DB_URL:jdbc:postgresql://127.0.0.1:5432/taskflow?connectTimeout=3&socketTimeout=10&tcpKeepAlive=true}"
+    username: "${TASKFLOW_DB_USERNAME:taskflow}"
+    password: "${TASKFLOW_DB_PASSWORD:}"
+    hikari:
+      pool-name: TaskFlowPool
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 3000
+      validation-timeout: 2000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        check_nullability: true
+        jdbc:
+          batch_size: 25
+        order_updates: true
+  flyway:
+    enabled: true
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+
+server:
+  address: 127.0.0.1
+  port: "${PORT:8080}"
+  error:
+    include-message: never
+    include-stacktrace: never
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    disable-swagger-default-url: true
+
+taskflow:
+  allowed-origins: "${TASKFLOW_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}"
+
+logging:
+  level:
+    root: INFO
+    com.taskflow.backend: INFO

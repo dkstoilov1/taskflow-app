@@ -1,0 +1,555 @@
+{
+  "info": {
+    "_postman_id": "4e2f5ac9-356d-4851-a469-77a7104a0f10",
+    "name": "TaskFlow Local API",
+    "description": "Manual collection for the frozen TaskFlow contract in docs/api.md. Run only against a local disposable development service. The write requests use only the task created by this collection; path/ETag variable collisions or a non-loopback base URL skip guarded requests. Backend execution has not been verified.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const rawBaseUrl = pm.variables.replaceIn('{{baseUrl}}');",
+          "let parsedBaseUrl;",
+          "try {",
+          "  parsedBaseUrl = new URL(rawBaseUrl);",
+          "} catch (error) {",
+          "  console.error('TaskFlow collection requires a valid local baseUrl.');",
+          "  pm.execution.skipRequest();",
+          "}",
+          "if (parsedBaseUrl) {",
+          "  const host = parsedBaseUrl.hostname.toLowerCase().replace(/^\\[|\\]$/g, '');",
+          "  const isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '::1';",
+          "if (parsedBaseUrl.protocol !== 'http:' || !isLoopback || parsedBaseUrl.pathname !== '/' || parsedBaseUrl.search || parsedBaseUrl.hash || parsedBaseUrl.username || parsedBaseUrl.password) {",
+          "    console.error('TaskFlow collection is restricted to an http loopback baseUrl.');",
+          "    pm.execution.skipRequest();",
+          "  }",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Create task owned by this collection",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"TaskFlow Postman sample\",\n  \"description\": \"Created by this collection run; safe to update and delete through its chained requests.\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/api/tasks"
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "for (const key of ['taskflowCreatedTaskId', 'taskflowOwnedTaskId', 'taskflowTaskVersion', 'taskflowTaskEtag', 'taskflowPreviousEtag']) {",
+              "  pm.collectionVariables.set(key, '');",
+              "}"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Create returns 201 and capture only its task after validation', function () {",
+              "  pm.response.to.have.status(201);",
+              "  const task = pm.response.json();",
+              "  pm.expect(task).to.have.property('id').that.is.a('string');",
+              "  pm.expect(task).to.have.property('title', 'TaskFlow Postman sample');",
+              "  pm.expect(task).to.have.property('description', 'Created by this collection run; safe to update and delete through its chained requests.');",
+              "  pm.expect(task.version).to.be.a('number');",
+              "  const etag = pm.response.headers.get('ETag');",
+              "  const match = etag && etag.match(/^\\\"(0|[1-9][0-9]*)\\\"$/);",
+              "  pm.expect(match, 'strong quoted decimal ETag').to.not.eql(null);",
+              "  pm.expect(Number(match[1])).to.eql(task.version);",
+              "  const baseUrl = new URL(pm.variables.replaceIn('{{baseUrl}}'));",
+              "  const locationValue = pm.response.headers.get('Location');",
+              "  pm.expect(locationValue, 'Location header').to.be.a('string');",
+              "  const location = new URL(locationValue, baseUrl);",
+              "  pm.expect(location.origin).to.eql(baseUrl.origin);",
+              "  pm.expect(location.pathname).to.eql('/api/tasks/' + task.id);",
+              "  pm.collectionVariables.set('taskflowCreatedTaskId', task.id);",
+              "  pm.collectionVariables.set('taskflowOwnedTaskId', task.id);",
+              "  pm.collectionVariables.set('taskflowTaskVersion', String(task.version));",
+              "  pm.collectionVariables.set('taskflowTaskEtag', etag);",
+              "  pm.collectionVariables.set('taskflowPreviousEtag', '');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "List and search tasks",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/tasks?page={{page}}&size={{size}}&q={{q}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('List returns a paginated task response', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const result = pm.response.json();",
+              "  pm.expect(result.items).to.be.an('array');",
+              "  pm.expect(result.page).to.be.a('number');",
+              "  pm.expect(result.size).to.be.a('number');",
+              "  pm.expect(result.totalElements).to.be.a('number');",
+              "  pm.expect(result.totalPages).to.be.a('number');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Read collection-owned task",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/tasks/{{taskflowCreatedTaskId}}"
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const id = pm.collectionVariables.get('taskflowCreatedTaskId');",
+              "const ownerId = pm.collectionVariables.get('taskflowOwnedTaskId');",
+              "const resolvedId = pm.variables.replaceIn('{{taskflowCreatedTaskId}}');",
+              "if (!id || ownerId !== id || resolvedId !== id) {",
+              "  console.error('Run the collection create request first; task ID must match this collection run.');",
+              "  pm.execution.skipRequest();",
+              "}"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Read task created by this collection and refresh its version/ETag', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const task = pm.response.json();",
+              "  pm.expect(task.id).to.eql(pm.collectionVariables.get('taskflowCreatedTaskId'));",
+              "  const etag = pm.response.headers.get('ETag');",
+              "  const match = etag && etag.match(/^\\\"(0|[1-9][0-9]*)\\\"$/);",
+              "  pm.expect(match, 'strong quoted decimal ETag').to.not.eql(null);",
+              "  pm.expect(Number(match[1])).to.eql(task.version);",
+              "  pm.collectionVariables.set('taskflowTaskVersion', String(task.version));",
+              "  pm.collectionVariables.set('taskflowTaskEtag', etag);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Replace collection-owned task",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "If-Match",
+            "value": "{{taskflowTaskEtag}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"TaskFlow Postman sample updated\",\n  \"description\": \"Updated by this collection with the latest ETag.\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/api/tasks/{{taskflowCreatedTaskId}}"
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const id = pm.collectionVariables.get('taskflowCreatedTaskId');",
+              "const ownerId = pm.collectionVariables.get('taskflowOwnedTaskId');",
+              "const resolvedId = pm.variables.replaceIn('{{taskflowCreatedTaskId}}');",
+              "const etag = pm.collectionVariables.get('taskflowTaskEtag');",
+              "const resolvedEtag = pm.variables.replaceIn('{{taskflowTaskEtag}}');",
+              "if (!id || ownerId !== id || resolvedId !== id || !/^\\\"(0|[1-9][0-9]*)\\\"$/.test(etag || '') || resolvedEtag !== etag) {",
+              "  console.error('Update requires this collection run’s task and its latest strong ETag.');",
+              "  pm.execution.skipRequest();",
+              "}"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Update replaces fields and advances version exactly once', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const priorEtag = pm.collectionVariables.get('taskflowTaskEtag');",
+              "  const priorVersion = Number(pm.collectionVariables.get('taskflowTaskVersion'));",
+              "  const task = pm.response.json();",
+              "  pm.expect(task.id).to.eql(pm.collectionVariables.get('taskflowCreatedTaskId'));",
+              "  pm.expect(task.title).to.eql('TaskFlow Postman sample updated');",
+              "  pm.expect(task.description).to.eql('Updated by this collection with the latest ETag.');",
+              "  pm.expect(task.version).to.eql(priorVersion + 1);",
+              "  const etag = pm.response.headers.get('ETag');",
+              "  pm.expect(etag).to.eql('\\\"' + task.version + '\\\"');",
+              "  pm.collectionVariables.set('taskflowPreviousEtag', priorEtag);",
+              "  pm.collectionVariables.set('taskflowTaskVersion', String(task.version));",
+              "  pm.collectionVariables.set('taskflowTaskEtag', etag);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Error: invalid task UUID (400)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/problem+json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/tasks/not-a-uuid"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Malformed UUID returns Problem Details 400', function () {",
+              "  pm.response.to.have.status(400);",
+              "  pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json');",
+              "  pm.expect(pm.response.json()).to.have.property('status', 400);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Error: invalid pagination (400)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/problem+json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/tasks?page=-1&size=101"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Invalid pagination returns Problem Details 400', function () {",
+              "  pm.response.to.have.status(400);",
+              "  pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json');",
+              "  pm.expect(pm.response.json()).to.have.property('status', 400);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Error: missing task (404)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/problem+json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/tasks/00000000-0000-4000-8000-000000000001"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Unknown task returns Problem Details 404', function () {",
+              "  pm.response.to.have.status(404);",
+              "  pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json');",
+              "  pm.expect(pm.response.json()).to.have.property('status', 404);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Error: missing If-Match (428)",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/problem+json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"This request must not be applied\",\n  \"description\": \"It intentionally omits If-Match.\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/api/tasks/{{taskflowCreatedTaskId}}"
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const id = pm.collectionVariables.get('taskflowCreatedTaskId');",
+              "const ownerId = pm.collectionVariables.get('taskflowOwnedTaskId');",
+              "if (!id || ownerId !== id || pm.variables.replaceIn('{{taskflowCreatedTaskId}}') !== id) {",
+              "  console.error('Run the collection create request first; missing-header test is limited to its task.');",
+              "  pm.execution.skipRequest();",
+              "}"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Missing If-Match returns Problem Details 428', function () {",
+              "  pm.response.to.have.status(428);",
+              "  pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json');",
+              "  pm.expect(pm.response.json()).to.have.property('status', 428);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Error: stale If-Match (412)",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/problem+json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "If-Match",
+            "value": "{{taskflowPreviousEtag}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Stale update must not be applied\",\n  \"description\": \"This request uses the pre-update ETag.\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/api/tasks/{{taskflowCreatedTaskId}}"
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const id = pm.collectionVariables.get('taskflowCreatedTaskId');",
+              "const ownerId = pm.collectionVariables.get('taskflowOwnedTaskId');",
+              "const oldEtag = pm.collectionVariables.get('taskflowPreviousEtag');",
+              "const latestEtag = pm.collectionVariables.get('taskflowTaskEtag');",
+              "if (!id || ownerId !== id || pm.variables.replaceIn('{{taskflowCreatedTaskId}}') !== id || !oldEtag || oldEtag === latestEtag || pm.variables.replaceIn('{{taskflowPreviousEtag}}') !== oldEtag) {",
+              "  console.error('Run create and update first; stale-version test requires this task’s prior ETag.');",
+              "  pm.execution.skipRequest();",
+              "}"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Stale If-Match returns Problem Details 412', function () {",
+              "  pm.response.to.have.status(412);",
+              "  pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json');",
+              "  pm.expect(pm.response.json()).to.have.property('status', 412);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Delete collection-owned task",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "If-Match",
+            "value": "{{taskflowTaskEtag}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/tasks/{{taskflowCreatedTaskId}}"
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const id = pm.collectionVariables.get('taskflowCreatedTaskId');",
+              "const ownerId = pm.collectionVariables.get('taskflowOwnedTaskId');",
+              "const resolvedId = pm.variables.replaceIn('{{taskflowCreatedTaskId}}');",
+              "const etag = pm.collectionVariables.get('taskflowTaskEtag');",
+              "const resolvedEtag = pm.variables.replaceIn('{{taskflowTaskEtag}}');",
+              "if (!id || ownerId !== id || resolvedId !== id || !/^\\\"(0|[1-9][0-9]*)\\\"$/.test(etag || '') || resolvedEtag !== etag) {",
+              "  console.error('Delete requires this collection run’s task and its latest strong ETag.');",
+              "  pm.execution.skipRequest();",
+              "}"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Delete returns empty 204 for this collection-owned task', function () {",
+              "  pm.response.to.have.status(204);",
+              "  pm.expect(pm.response.text()).to.eql('');",
+              "  pm.collectionVariables.set('taskflowCreatedTaskId', '');",
+              "  pm.collectionVariables.set('taskflowOwnedTaskId', '');",
+              "  pm.collectionVariables.set('taskflowTaskVersion', '');",
+              "  pm.collectionVariables.set('taskflowTaskEtag', '');",
+              "  pm.collectionVariables.set('taskflowPreviousEtag', '');",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:8080",
+      "type": "string"
+    },
+    {
+      "key": "page",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "size",
+      "value": "20",
+      "type": "string"
+    },
+    {
+      "key": "q",
+      "value": "release",
+      "type": "string"
+    },
+    {
+      "key": "taskflowCreatedTaskId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "taskflowOwnedTaskId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "taskflowTaskVersion",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "taskflowTaskEtag",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "taskflowPreviousEtag",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}

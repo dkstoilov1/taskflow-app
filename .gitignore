@@ -1,0 +1,35 @@
+# Local secrets and environment overrides
+/.env
+/.env.*
+!/.env.example
+/frontend/.env.local
+/frontend/.env.*.local
+/frontend/.env
+/frontend/.env.*
+!/frontend/.env.example
+!/frontend/.env.mock
+
+# Local database backups
+*.dump
+*.backup
+.taskflow-backup-*.tmp
+
+# Java / Maven
+backend/target/
+
+# Node / frontend build output
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+playwright-report/
+test-results/
+__pycache__/
+*.py[cod]
+
+# IDE and operating-system files
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+desktop.ini
