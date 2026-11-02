@@ -17,6 +17,7 @@ const TASK_A: Task = {
   title: 'Contract response task',
   description: 'Details',
   version: 0,
+  dueDate: null, priority: 'medium', projectId: null, status: 'active', completedAt: null,
 };
 
 describe('stateful mock contract', () => {

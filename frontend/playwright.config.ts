@@ -3,6 +3,9 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
+  // The suite includes a 50 ms main-thread performance budget. Avoid CPU
+  // contention from simultaneous Chromium instances; keep all tests enabled.
+  workers: 1,
   retries: 0,
   reporter: 'list',
   use: {

@@ -1,5 +1,7 @@
 package com.taskflow.backend.task.persistence;
 
+import java.time.Instant;
+import java.util.List;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -9,19 +11,30 @@ import org.springframework.data.domain.Pageable;
 public interface TaskSearchRepository {
 
     /**
-     * Reads an ordered task page using a database-native offset that supports large page indexes.
+     * Applies all allowlisted filters, sorting, and server-side pagination in PostgreSQL.
      *
-     * @param pageable bounded page size and deterministic ordering request
-     * @return all tasks for the requested page and total count
+     * @param criteria filters and calendar boundaries resolved by the application service
+     * @param pageable requested page and size
+     * @return matching tasks and the total matching count
      */
-    Page<TaskEntity> listAllTasks(Pageable pageable);
+    Page<TaskEntity> searchTasks(TaskSearchCriteria criteria, Pageable pageable);
 
     /**
-     * Finds tasks containing a literal, case-insensitive query in either editable field.
+     * Counts tasks currently completed within a half-open instant range.
      *
-     * @param query trimmed search text without SQL wildcard interpretation
-     * @param pageable bounded page and deterministic ordering request
-     * @return matching tasks and total count
+     * @param start inclusive range start
+     * @param end exclusive range end
+     * @return number of matching completed tasks
      */
-    Page<TaskEntity> searchLiteral(String query, Pageable pageable);
+    long countCompletedBetween(Instant start, Instant end);
+
+    /**
+     * Groups current completions by local date in the supplied IANA timezone.
+     *
+     * @param start inclusive instant range start
+     * @param end exclusive instant range end
+     * @param timeZone valid IANA timezone ID
+     * @return rows containing local date and completion count
+     */
+    List<Object[]> dailyCompletions(Instant start, Instant end, String timeZone);
 }

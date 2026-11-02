@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import * as AlertDialog from '@radix-ui/react-alert-dialog';
 import * as Dialog from '@radix-ui/react-dialog';
-import { ApiError, reloadTask } from '../../api/client';
+import { ApiError, reloadTask, matchesTaskInput } from '../../api/client';
+import { isCalendarDate } from '../../api/calendar';
+import { useProjects } from '../projects/useProjects';
 import type { Task, TaskInput, TaskPage } from '../../api/types';
 import { useCreateTask, useUpdateTask } from './useTasks';
 
@@ -37,6 +39,12 @@ export function TaskFormDialog({
   const [currentTask, setCurrentTask] = useState(task);
   const [title, setTitle] = useState(task?.title ?? '');
   const [description, setDescription] = useState(task?.description ?? '');
+  const [metadata, setMetadata] = useState({
+    dueDate: task?.dueDate ?? null, priority: task?.priority ?? 'medium',
+    projectId: task?.projectId ?? null, status: task?.status ?? 'active',
+  });
+  const projectsQuery = useProjects();
+  const draft: TaskInput = {title, description, ...metadata};
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [formError, setFormError] = useState('');
   const [discardOpen, setDiscardOpen] = useState(false);
@@ -57,11 +65,14 @@ export function TaskFormDialog({
   const isPending = createMutation.isPending || updateMutation.isPending;
   const isDirty =
     title !== (currentTask?.title ?? '') ||
-    description !== (currentTask?.description ?? '');
+    description !== (currentTask?.description ?? '') ||
+    metadata.dueDate !== (currentTask?.dueDate ?? null) ||
+    metadata.priority !== (currentTask?.priority ?? 'medium') ||
+    metadata.projectId !== (currentTask?.projectId ?? null) ||
+    metadata.status !== (currentTask?.status ?? 'active');
   const matchingRecentTask = recentTasks?.find(
     (recentTask) =>
-      recentTask.title === title.trim() &&
-      recentTask.description === description,
+      matchesTaskInput(recentTask, draft),
   );
   const hasUnresolvedConflict = Boolean(
     currentTask &&
@@ -101,9 +112,10 @@ export function TaskFormDialog({
     onOpenChange(false);
   }
 
-  function setInput(field: 'title' | 'description', value: string): void {
+  function setInput(field: keyof TaskInput, value: string): void {
     if (field === 'title') setTitle(value);
-    else setDescription(value);
+    else if (field === 'description') setDescription(value);
+    else setMetadata((previous) => ({...previous, [field]: value || null}));
     setFieldErrors((previous) => {
       if (!previous[field]) return previous;
       const next = { ...previous };
@@ -167,6 +179,7 @@ export function TaskFormDialog({
     if (decision === 'discard-draft') {
       setTitle(latest.title);
       setDescription(latest.description);
+      setMetadata({dueDate: latest.dueDate, priority: latest.priority, projectId: latest.projectId, status: latest.status});
       setFormError('');
     } else {
       setFormError(
@@ -230,17 +243,19 @@ export function TaskFormDialog({
         `Use no more than ${DESCRIPTION_LIMIT} characters.`,
       ];
     }
+    if (metadata.dueDate !== null && !isCalendarDate(metadata.dueDate)) errors.dueDate = ['Use a valid calendar date (YYYY-MM-DD).'];
     setFieldErrors(errors);
     setFormError('');
     if (Object.keys(errors).length > 0) return;
 
-    const input: TaskInput = { title: normalizedTitle, description };
+    const input: TaskInput = { title: normalizedTitle, description, ...metadata };
     try {
       const saved = currentTask
         ? await updateMutation.mutateAsync({
             id: currentTask.id,
             version: currentTask.version,
             input,
+            previous: currentTask,
           })
         : await createMutation.mutateAsync(input);
       onSaved(saved);
@@ -386,6 +401,37 @@ export function TaskFormDialog({
                   </span>
                 )}
               </div>
+              <div className="metadata-fields">
+                <div className="field">
+                  <label htmlFor="task-dueDate">Deadline</label>
+                  <input id="task-dueDate" type="date" min="0001-01-01" max="9999-12-31" value={metadata.dueDate ?? ''} disabled={isPending}
+                    onChange={(event) => setInput('dueDate', event.target.value)} aria-invalid={Boolean(fieldErrors.dueDate)} aria-describedby={fieldErrors.dueDate ? 'dueDate-error' : undefined} />
+                </div>
+                <div className="field">
+                  <label htmlFor="task-priority">Priority</label>
+                  <select id="task-priority" value={metadata.priority} disabled={isPending} onChange={(event) => setInput('priority', event.target.value)} aria-invalid={Boolean(fieldErrors.priority)} aria-describedby={fieldErrors.priority ? 'priority-error' : undefined}>
+                    <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="task-project">Project</label>
+                  <select id="task-project" value={metadata.projectId ?? ''} disabled={isPending || projectsQuery.isPending || projectsQuery.isError}
+                    onChange={(event) => setInput('projectId', event.target.value)} aria-invalid={Boolean(fieldErrors.projectId)} aria-describedby={fieldErrors.projectId ? 'projectId-error' : undefined}>
+                    <option value="">Unassigned</option>
+                    {metadata.projectId && !projectsQuery.data?.some((project) => project.id === metadata.projectId) ? <option value={metadata.projectId}>Unavailable project — choose another</option> : null}
+                    {projectsQuery.data?.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+                  </select>
+                  {projectsQuery.isPending ? <span role="status">Loading projects…</span> : null}
+                  {projectsQuery.isError ? <p role="alert">Projects couldn’t load. <button type="button" onClick={() => void projectsQuery.refetch()}>Retry projects</button></p> : null}
+                </div>
+                <div className="field">
+                  <label htmlFor="task-status">Status</label>
+                  <select id="task-status" value={metadata.status} disabled={isPending} onChange={(event) => setInput('status', event.target.value)} aria-invalid={Boolean(fieldErrors.status)} aria-describedby={fieldErrors.status ? 'status-error' : undefined}>
+                    <option value="active">Active</option><option value="completed">Completed</option>
+                  </select>
+                </div>
+              </div>
+              {['dueDate', 'priority', 'projectId', 'status'].map((field) => fieldErrors[field] ? <p className="field-error" id={`${field}-error`} key={field} role="alert">{field}: {fieldErrors[field].join(' ')}</p> : null)}
               {formError && !updateRecoveryReason ? (
                 <div className="form-error" role="alert">
                   <p>{formError}</p>
@@ -435,6 +481,7 @@ export function TaskFormDialog({
                   <h3 id="latest-task-review-title">
                     Latest task on server · version {latestTaskReview.version}
                   </h3>
+                  <p>{latestTaskReview.dueDate ?? 'No deadline'} · {latestTaskReview.priority} priority · Project: {latestTaskReview.projectId ?? 'Unassigned'} · {latestTaskReview.status}</p>
                   <p>
                     <strong>Title:</strong> {latestTaskReview.title}
                   </p>
@@ -485,6 +532,8 @@ export function TaskFormDialog({
                   <p>
                     Review these newest tasks before deciding whether to create
                     again. Your draft is still here.
+                    Only the newest 20 tasks are checked; an older match may
+                    not appear. Retrying can create a duplicate.
                   </p>
                   {recentTasks.length > 0 ? (
                     <ul aria-label="Recent tasks to review">
@@ -498,6 +547,7 @@ export function TaskFormDialog({
                               <p>
                                 {recentTask.description || 'No description'}
                               </p>
+                              <p>{recentTask.dueDate ?? 'No deadline'} · {recentTask.priority} · {recentTask.projectId ?? 'Unassigned'} · {recentTask.status}</p>
                             </div>
                             {isDraftMatch ? (
                               <button
@@ -587,7 +637,7 @@ export function TaskFormDialog({
               Discard your changes?
             </AlertDialog.Title>
             <AlertDialog.Description className="dialog-intro">
-              Your unsaved title or description will be lost.
+              All your unsaved task fields will be lost.
             </AlertDialog.Description>
             <div className="form-actions">
               <AlertDialog.Cancel asChild>
@@ -627,9 +677,11 @@ export function TaskFormDialog({
               The server has version {latestTaskReview?.version}, titled “
               {latestTaskReview?.title}”, with description “
               {latestTaskReview?.description || 'No description'}”.{' '}
+              Deadline: {latestTaskReview?.dueDate ?? 'None'}; priority: {latestTaskReview?.priority};
+              project: {latestTaskReview?.projectId ?? 'Unassigned'}; status: {latestTaskReview?.status}.{' '}
               {conflictDecision === 'overwrite-latest'
-                ? `Your draft (“${title.trim()}”; description: “${description || 'No description'}”) will replace those newer values after you confirm and then save.`
-                : 'Confirming will replace your unsaved title and description with the server values above.'}
+                ? `Your draft (“${title.trim()}”; description: “${description || 'No description'}”; deadline: ${metadata.dueDate ?? 'None'}; priority: ${metadata.priority}; project: ${metadata.projectId ?? 'Unassigned'}; status: ${metadata.status}) will replace those newer values after you confirm and then save.`
+                : 'Confirming will replace all your unsaved task fields with the server values above.'}
             </AlertDialog.Description>
             <div className="form-actions">
               <AlertDialog.Cancel asChild>
@@ -666,7 +718,7 @@ export function TaskFormDialog({
             <AlertDialog.Description className="dialog-intro">
               A recent task exactly matches this draft: “
               {matchingRecentTask?.title}”. Confirming allows another task with
-              the same title and description. No create request is sent until
+              the same editable fields. No create request is sent until
               you separately choose “Try create again”.
             </AlertDialog.Description>
             <div className="form-actions">

@@ -8,6 +8,7 @@ test('create, edit, search, and permanently delete a task with keyboard controls
   page,
 }) => {
   await page.goto('/');
+  await page.getByRole('button', {name: 'All Tasks', exact: true}).click();
   await expect(page.getByRole('heading', { name: 'A fresh start.' })).toBeVisible();
 
   await page.getByRole('button', { name: 'New task' }).focus();
@@ -53,6 +54,7 @@ test('paginates and searches on the server and fits narrow and wide layouts', as
   page,
 }) => {
   await page.goto('/');
+  await page.getByRole('button', {name: 'All Tasks', exact: true}).click();
   await expect(page.getByRole('heading', { name: 'A fresh start.' })).toBeVisible();
   await page.evaluate((ids) => {
     if (!window.taskflowMock) throw new Error('The in-browser mock is not ready.');
@@ -68,6 +70,7 @@ test('paginates and searches on the server and fits narrow and wide layouts', as
   }, TASK_IDS);
   expect(await page.evaluate(() => window.taskflowMock?.count())).toBe(24);
   await page.reload();
+  await page.getByRole('button', {name: 'All Tasks', exact: true}).click();
   await expect(page.getByText('24 tasks')).toBeVisible();
   await page.getByRole('searchbox', { name: 'Search tasks' }).fill('Task');
   await expect(page.getByRole('heading', { name: 'Task 24' })).toBeVisible();
@@ -107,6 +110,7 @@ test('preserves drafts after stale edits and deletes across two browser tabs', a
   context,
 }) => {
   await page.goto('/');
+  await page.getByRole('button', {name: 'All Tasks', exact: true}).click();
   const taskId = TASK_IDS[0];
   await expect(page.getByRole('heading', { name: 'A fresh start.' })).toBeVisible();
   await page.evaluate(
@@ -134,6 +138,7 @@ test('preserves drafts after stale edits and deletes across two browser tabs', a
 
   const secondTab = await context.newPage();
   await secondTab.goto('/');
+  await secondTab.getByRole('button', {name: 'All Tasks', exact: true}).click();
   await expect(
     secondTab.getByRole('heading', { name: 'Original task' }),
   ).toBeVisible();
@@ -190,6 +195,7 @@ test('requires a fresh server review before retrying an uncertain update', async
   page,
 }) => {
   await page.goto('/');
+  await page.getByRole('button', {name: 'All Tasks', exact: true}).click();
   await expect(page.getByRole('heading', { name: 'A fresh start.' })).toBeVisible();
   const taskId = TASK_IDS[5];
   await page.evaluate(
@@ -208,6 +214,7 @@ test('requires a fresh server review before retrying an uncertain update', async
     { id: taskId },
   );
   await page.reload();
+  await page.getByRole('button', {name: 'All Tasks', exact: true}).click();
   await expect(page.getByRole('heading', { name: 'Current server task' })).toBeVisible();
   await page.getByRole('button', { name: 'Edit Current server task' }).click();
   await page.getByLabel('Title').fill('Draft after uncertain update');
@@ -240,6 +247,7 @@ test('synchronizes reset followed by reseed into another tab with a cached revis
 }) => {
   const taskId = TASK_IDS[0];
   await page.goto('/');
+  await page.getByRole('button', {name: 'All Tasks', exact: true}).click();
   await expect(page.getByRole('heading', { name: 'A fresh start.' })).toBeVisible();
   await page.evaluate(
     ({ id }) => {
@@ -261,6 +269,7 @@ test('synchronizes reset followed by reseed into another tab with a cached revis
 
   const secondTab = await context.newPage();
   await secondTab.goto('/');
+  await secondTab.getByRole('button', {name: 'All Tasks', exact: true}).click();
   await expect(secondTab.getByRole('heading', { name: 'Before reset' }))
     .toBeVisible();
 
@@ -297,6 +306,7 @@ test('keeps 10,000 seeded tasks paginated and responsive while delayed search re
     observedWindow.__longTasks = [];
   });
   await page.goto('/');
+  await page.getByRole('button', {name: 'All Tasks', exact: true}).click();
   await expect(page.getByRole('heading', { name: 'A fresh start.' })).toBeVisible();
   await page.evaluate(() => {
     if (!window.taskflowMock) throw new Error('The in-browser mock is not ready.');
@@ -426,6 +436,7 @@ test('surfaces uncertain create outcomes and warns before discarding dirty input
   page,
 }) => {
   await page.goto('/');
+  await page.getByRole('button', {name: 'All Tasks', exact: true}).click();
   await page.getByRole('button', { name: 'New task' }).click();
   await page.getByLabel('Title').fill('Draft after a network failure');
   await page.evaluate(() => window.taskflowMock?.failNext('network'));

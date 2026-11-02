@@ -10,7 +10,9 @@ import {
 } from '../../mocks/store';
 import { server } from '../../mocks/server';
 import { renderWithQuery } from '../../test/render';
-import { TaskFlowPage } from './TaskFlowPage';
+import { TaskFlowPage as Workspace } from './TaskFlowPage';
+
+const TaskFlowPage = () => <Workspace initialView="all" />;
 
 function makeTask(index: number, createdAt = index): Task & { createdAt: number } {
   return {
@@ -18,6 +20,7 @@ function makeTask(index: number, createdAt = index): Task & { createdAt: number 
     title: `Task ${index}`,
     description: `Description for task ${index}`,
     version: 0,
+    dueDate: null, priority: 'medium', projectId: null, status: 'active', completedAt: null,
     createdAt,
   };
 }
@@ -316,7 +319,7 @@ describe('TaskFlowPage', () => {
       expect(screen.getByText('Gathering your tasks…')).toBeVisible();
       await waitFor(() => expect(taskListRequests).toBe(1));
       setMockLatency(0);
-      failNextMockRequest('network');
+      server.use(http.post('/api/tasks', () => HttpResponse.error(), {once: true}));
 
       await user.click(screen.getByRole('button', { name: 'New task' }));
       await user.type(screen.getByLabelText('Title'), 'Retry after checking');

@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "4e2f5ac9-356d-4851-a469-77a7104a0f10",
     "name": "TaskFlow Local API",
-    "description": "Manual collection for the frozen TaskFlow contract in docs/api.md. Run only against a local disposable development service. The write requests use only the task created by this collection; path/ETag variable collisions or a non-loopback base URL skip guarded requests. Backend execution has not been verified.",
+    "description": "Postman v2.1 collection for the fixed TaskFlow API contract. Run only against the local disposable service. Writes are guarded to resources created by this collection; the collection-level script restricts baseUrl to loopback.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "event": [
@@ -48,7 +48,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"title\": \"TaskFlow Postman sample\",\n  \"description\": \"Created by this collection run; safe to update and delete through its chained requests.\"\n}",
+          "raw": "{\n  \"title\": \"TaskFlow Postman sample\",\n  \"description\": \"Created by this collection run; safe to update and delete through its chained requests.\",\n  \"dueDate\": null,\n  \"priority\": \"medium\",\n  \"projectId\": null,\n  \"status\": \"active\"\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -112,7 +112,7 @@
             "value": "application/json"
           }
         ],
-        "url": "{{baseUrl}}/api/tasks?page={{page}}&size={{size}}&q={{q}}"
+        "url": "{{baseUrl}}/api/tasks?page={{page}}&size={{size}}&q={{q}}&view={{view}}&status={{status}}&priority={{priority}}&due={{due}}&project={{project}}&sort={{sort}}&timeZone={{timeZone}}"
       },
       "event": [
         {
@@ -203,7 +203,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"title\": \"TaskFlow Postman sample updated\",\n  \"description\": \"Updated by this collection with the latest ETag.\"\n}",
+          "raw": "{\n  \"title\": \"TaskFlow Postman updated sample\",\n  \"description\": \"Updated with all editable fields.\",\n  \"dueDate\": null,\n  \"priority\": \"high\",\n  \"projectId\": null,\n  \"status\": \"active\"\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -456,6 +456,86 @@
       ]
     },
     {
+      "name": "Complete collection-owned task",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "If-Match",
+            "value": "{{taskflowTaskEtag}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/tasks/{{taskflowCreatedTaskId}}/status",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"status\": \"completed\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const id = pm.collectionVariables.get('taskflowCreatedTaskId');",
+              "const owner = pm.collectionVariables.get('taskflowOwnedTaskId');",
+              "const resolved = pm.variables.replaceIn('{{taskflowCreatedTaskId}}');",
+              "if (!id || owner !== id || resolved !== id) {",
+              "  console.error('Run this collection create task first; refusing to mutate another task.');",
+              "  pm.execution.skipRequest();",
+              "}"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status PATCH advances ETag and sets completion time', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const task = pm.response.json();",
+              "  pm.expect(task.status).to.eql('completed');",
+              "  pm.expect(task.completedAt).to.be.a('string');",
+              "  const etag = pm.response.headers.get('ETag');",
+              "  pm.expect(etag).to.eql('\\\"' + task.version + '\\\"');",
+              "  pm.collectionVariables.set('taskflowTaskEtag', etag);",
+              "  pm.collectionVariables.set('taskflowTaskVersion', String(task.version));",
+              "});"
+            ]
+          }
+        },
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const id = pm.collectionVariables.get('taskflowCreatedTaskId');",
+              "const owner = pm.collectionVariables.get('taskflowOwnedTaskId');",
+              "const resolved = pm.variables.replaceIn('{{taskflowCreatedTaskId}}');",
+              "if (!id || owner !== id || resolved !== id) {",
+              "  console.error('Run this collection create task first; refusing to mutate another task.');",
+              "  pm.execution.skipRequest();",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "Delete collection-owned task",
       "request": {
         "method": "DELETE",
@@ -499,6 +579,443 @@
               "  pm.collectionVariables.set('taskflowTaskEtag', '');",
               "  pm.collectionVariables.set('taskflowPreviousEtag', '');",
               "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Projects and statistics",
+      "item": [
+        {
+          "name": "List projects",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/projects"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Project list includes an array', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json()).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create collection-owned project",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/projects",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{taskflowProjectName}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of ['taskflowProjectId', 'taskflowProjectEtag', 'taskflowProjectPreviousEtag']) {",
+                  "  pm.collectionVariables.set(key, '');",
+                  "}",
+                  "pm.collectionVariables.set('taskflowProjectName', 'TaskFlow project ' + Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Project creation stores only the collection-owned project', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "  const project = pm.response.json();",
+                  "  pm.expect(project.name).to.eql(pm.collectionVariables.get('taskflowProjectName'));",
+                  "  const etag = pm.response.headers.get('ETag');",
+                  "  pm.expect(etag).to.eql('\\\"' + project.version + '\\\"');",
+                  "  const location = new URL(pm.response.headers.get('Location'), new URL(pm.variables.replaceIn('{{baseUrl}}')));",
+                  "  pm.expect(location.pathname).to.eql('/api/projects/' + project.id);",
+                  "  pm.collectionVariables.set('taskflowProjectId', project.id);",
+                  "  pm.collectionVariables.set('taskflowProjectEtag', etag);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Read collection-owned project",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/projects/{{taskflowProjectId}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const id = pm.collectionVariables.get('taskflowProjectId');",
+                  "if (!id || pm.variables.replaceIn('{{taskflowProjectId}}') !== id) { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Project detail returns its authoritative ETag', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const project = pm.response.json();",
+                  "  const etag = pm.response.headers.get('ETag');",
+                  "  pm.expect(etag).to.eql('\\\"' + project.version + '\\\"');",
+                  "  pm.collectionVariables.set('taskflowProjectEtag', etag);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rename collection-owned project",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "{{taskflowProjectEtag}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/projects/{{taskflowProjectId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{taskflowProjectName}} renamed\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const id = pm.collectionVariables.get('taskflowProjectId');",
+                  "const resolved = pm.variables.replaceIn('{{taskflowProjectId}}');",
+                  "if (!id || resolved !== id) {",
+                  "  console.error('Run this collection create project first; refusing to mutate another project.');",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Project rename advances the collection-owned ETag', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const project = pm.response.json();",
+                  "  const etag = pm.response.headers.get('ETag');",
+                  "  pm.collectionVariables.set('taskflowProjectPreviousEtag', pm.collectionVariables.get('taskflowProjectEtag'));",
+                  "  pm.collectionVariables.set('taskflowProjectEtag', etag);",
+                  "  pm.expect(etag).to.eql('\\\"' + project.version + '\\\"');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get productivity statistics",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/statistics?timeZone={{timeZone}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statistics include local calendar summaries', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const result = pm.response.json();",
+                  "  pm.expect(result.dailyCompletions).to.have.length(7);",
+                  "  pm.expect(result.projects).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Representative contract errors",
+      "item": [
+        {
+          "name": "Error: duplicate project name (409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/projects",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{taskflowProjectName}} renamed\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Duplicate case-insensitive name is a conflict', function () { pm.response.to.have.status(409); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Error: invalid timezone (400)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/statistics?timeZone=NotAZone"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Invalid IANA timezone is rejected', function () { pm.response.to.have.status(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Error: invalid task status (400)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "{{taskflowTaskEtag}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/tasks/{{taskflowCreatedTaskId}}/status",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"paused\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const id = pm.collectionVariables.get('taskflowCreatedTaskId');",
+                  "const owner = pm.collectionVariables.get('taskflowOwnedTaskId');",
+                  "const resolved = pm.variables.replaceIn('{{taskflowCreatedTaskId}}');",
+                  "if (!id || owner !== id || resolved !== id) {",
+                  "  console.error('Run this collection create task first; refusing to mutate another task.');",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Unknown status is rejected', function () { pm.response.to.have.status(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Error: missing project If-Match (428)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/projects/{{taskflowProjectId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Should not update\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const id = pm.collectionVariables.get('taskflowProjectId');",
+                  "const resolved = pm.variables.replaceIn('{{taskflowProjectId}}');",
+                  "if (!id || resolved !== id) {",
+                  "  console.error('Run this collection create project first; refusing to mutate another project.');",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Missing project precondition is required', function () { pm.response.to.have.status(428); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Delete collection-owned project",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "If-Match",
+            "value": "{{taskflowProjectEtag}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/projects/{{taskflowProjectId}}"
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const id = pm.collectionVariables.get('taskflowProjectId');",
+              "const resolved = pm.variables.replaceIn('{{taskflowProjectId}}');",
+              "if (!id || resolved !== id) {",
+              "  console.error('Run this collection create project first; refusing to mutate another project.');",
+              "  pm.execution.skipRequest();",
+              "}"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Project deletion preserves its tasks as unassigned', function () { pm.response.to.have.status(204); });"
             ]
           }
         }
@@ -548,6 +1065,61 @@
     },
     {
       "key": "taskflowPreviousEtag",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "view",
+      "value": "all",
+      "type": "string"
+    },
+    {
+      "key": "status",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "priority",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "due",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "project",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "sort",
+      "value": "created_desc",
+      "type": "string"
+    },
+    {
+      "key": "timeZone",
+      "value": "UTC",
+      "type": "string"
+    },
+    {
+      "key": "taskflowProjectId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "taskflowProjectName",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "taskflowProjectEtag",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "taskflowProjectPreviousEtag",
       "value": "",
       "type": "string"
     }

@@ -1,9 +1,11 @@
 # TaskFlow frontend
 
 TaskFlow is a responsive, local-first task manager for one person. It supports
-creating, searching, editing, and permanently deleting tasks. A task exposes
-only `title` and `description` as editable fields; the API owns its UUID and
-integer version.
+dashboard deadlines, task views, projects, completion/reopening, and productivity
+summaries in addition to searchable, paginated CRUD. Editable task fields are
+`title`, `description`, nullable date-only `dueDate`, `priority` (low/medium/high),
+nullable `projectId`, and `status` (active/completed). The API owns UUID, version,
+and completion timestamp. PostgreSQL, not the browser mock, is application storage.
 
 The shared contract is documented in [`../docs/api.md`](../docs/api.md). The
 frontend client, MSW mock, and tests implement that contract without changing
@@ -25,9 +27,15 @@ it.
   delete dialogs, and TanStack Query hooks. The UI requests a page of 20 tasks
   and sends search text to the server; it does not download and filter the
   full collection in the browser.
-- A query key includes the page and debounced search value. Query signals are
+- `src/features/projects/` contains accessible project management and its query/
+  mutation hooks. `src/features/dashboard/` composes three bounded server previews
+  and the server statistics response. `src/api/calendar.ts` provides date-only
+  validation/arithmetic and browser timezone identification; deadlines are never
+  converted to UTC timestamps.
+- A query key includes view, all filters, sorting, page, size, browser timezone,
+  and debounced search value. Query signals are
   forwarded to `fetch`, so an outdated search can be cancelled. Successful
-  mutations invalidate the task-list cache. Writes are not automatically
+  mutations invalidate task, project, dashboard, and statistics caches. Writes are not automatically
   retried.
 - Clearing search always returns to page zero. After a successful refresh, the
   view corrects a now-out-of-range page without reacting to placeholder data;
@@ -38,6 +46,44 @@ it.
 - `src/App.tsx` provides the QueryClient. `src/main.tsx` starts the browser
   mock only in development when `VITE_API_MOCK=true`. The mock is not started
   by production builds.
+
+## Views, organization, and statistics
+
+Dashboard is home. Due-today, overdue, and upcoming sections each request at most
+five tasks, ordered due-ascending, with exact counts from `totalElements` and
+links to full lists. These previews do not truncate aggregate counts.
+
+Today means **active due today or overdue**. Upcoming means active with a future
+deadline; neither includes undated tasks. All Tasks includes both statuses and
+undated tasks. Completed includes only completed tasks. All views support create,
+edit, delete and complete/reopen.
+
+Search, status, priority, deadline and project filters intersect the current view.
+Incompatible choices remain selected and show an explanatory empty state.
+Deadline filters are today, overdue and the inclusive Monday–Sunday week
+(including earlier days of that week). Project filtering includes Unassigned.
+Search/view/filter/sort changes reset pagination; Reset filters also clears search.
+Sorting supports newest first, due in either direction (undated last), priority
+high/low first, and status active/completed first. The server applies all search,
+filters, ordering, tie-breakers, pagination and totals; the browser never downloads
+the entire task collection to filter it.
+
+Projects can be created, renamed and deleted. Names are trimmed, 1–100 Unicode
+code points and unique ignoring case. Deletion requires confirmation and leaves
+associated tasks unassigned, advancing their versions. Names are resolved through
+the shared project query, not embedded in task responses.
+
+Statistics cover all current stored tasks, not just loaded previews/pages:
+completed today, completed this week, exactly seven daily counts ending today,
+and every existing project's completed/total rate rounded to one decimal
+(0.0% for empty projects). Unassigned tasks count globally but have no project
+rate. Reopening/deleting removes completion counts; re-completing records a new
+timestamp; editing an already completed task preserves its timestamp. This is
+not an immutable event history.
+
+Relative-date reads send the browser's IANA timezone, refresh at the next local
+midnight (DST-aware scheduling), and invalidate on focus. Invalid zones surface
+the API error rather than silently falling back to UTC.
 
 ## Technology
 
@@ -80,23 +126,30 @@ setting; do not put credentials or secrets in frontend environment files.
 
 ## Stateful mock and test controls
 
-The mock implements `GET /api/tasks`, `GET /api/tasks/{id}`,
-`POST /api/tasks`, `PUT /api/tasks/{id}`, and `DELETE /api/tasks/{id}`. It
-models title trimming, Unicode code-point limits, optional/null descriptions,
-literal case-insensitive search, pagination, deterministic ordering, ETags,
-`If-Match`, 400/404/412/428 responses, and sanitized 500/503 Problem Details.
+The mock implements task list/detail/create/replace/delete and
+`PATCH /api/tasks/{id}/status`, project list/detail/create/rename/delete, and
+`GET /api/statistics`. It models all contract fields, strict calendar dates,
+enum/UUID validation, unknown-field rejection, defaults, project existence,
+Unicode code-point limits, timestamps, literal case-insensitive search,
+intersection filters, all sorts, pagination, aggregates, strong ETags,
+`If-Match`, 400/404/409/412/428 responses, and sanitized 500/503 Problem Details.
 Creation, replacement, and deletion mutate the in-memory store; later requests
 observe the changed data.
 
 Tests can use the exports from `src/mocks/index.ts`:
 
-- `resetMockStore()` empties tasks and clears injected faults/latency. Browser
+- `resetMockStore()` empties tasks/projects and clears injected faults/latency. Browser
   resets publish a new monotonic revision so other tabs cannot mistake a
   reset-and-reseed cycle for an unchanged snapshot.
 - `seedMockTasks(items)` loads records with `id`, `title`, `description`,
-  `version`, and internal `createdAt`.
+  `version`, internal `createdAt`, and optional metadata (legacy fixtures default
+  to active/medium/undated/unassigned).
+- `seedMockProjects(items)` loads project IDs/names/versions. Seed projects before
+  task fixtures that reference them.
 - `setMockLatency(milliseconds)` delays each subsequent request.
 - `failNextMockRequest('network' | '500' | '503')` injects one failed request.
+  It applies to the next API request, including background reads; tests targeting
+  a particular operation can override one MSW handler with `{once: true}`.
 
 Vitest resets handlers and store state between tests. In mock browser mode, the same controls are exposed as `window.taskflowMock`
 for Playwright and are sent to the MSW handler. The handler keeps the
@@ -106,6 +159,13 @@ revision key avoids reparsing the full task snapshot when it has not changed,
 and an exclusive Web Lock protects reads, version checks, and writes across
 tabs where the browser supports it. This is test persistence, not durable
 application storage.
+
+Browser control methods are async: `reset()`, `seed(tasks)`,
+`seedProjects(projects)`, `setLatency(ms)`, `failNext(kind)`, and `count()` (tasks).
+The controls are dev-mock-only and use `/__taskflow_mock__/control`, not real
+application endpoints. Tests use the same handlers in Node and the browser.
+Clock-sensitive tests seed completion instants or control `Date`; tests include
+the 25-hour DST day, Monday/Sunday boundaries, local-midnight refresh and focus.
 
 ## Accessibility and responsive design
 
@@ -119,6 +179,16 @@ application storage.
   saving a newer version until the user explicitly confirms either discarding
   the draft or overwriting the displayed server values. An uncertain delete
   offers a real list refresh before the user acts again.
+- Dirty detection, latest-server review, explicit overwrite/discard decisions,
+  validation errors and exact uncertain-create duplicate comparison cover **all
+  six editable fields**, not just text. Completion uses a status-only PATCH
+  and never replaces unrelated fields. Project and status writes also gate
+  retries after ambiguity/stale versions until fresh server values are displayed
+  and the user explicitly acts again. Project-create recovery checks the fresh
+  project list for an existing case-insensitive name before permitting retry.
+- Completion state is shown in text with a check mark, never color alone.
+  Native labeled selects/date inputs support keyboard use; pending controls
+  disable repeated writes. Only confirmed writes produce success announcements.
 - A dirty form also registers a browser `beforeunload` warning. Browsers decide
   the wording and may not show that warning in every navigation or shutdown
   scenario; it is not a draft-recovery guarantee.
@@ -155,9 +225,27 @@ outside the source coverage include.
 Playwright tests run the Vite app with the same in-browser MSW handlers. They
 verify frontend workflows and the mock contract; **they do not verify
 integration with the real backend, database, or PostgreSQL concurrency
-behavior**. A separate manual browser smoke check exercised create, edit,
-search, and delete against the real backend and an isolated PostgreSQL 17.11
-instance. There is no automated full-stack test, and the smoke check does not
-verify Docker Compose. Mock data in browser
+behavior**. Real-backend integration for these new features, migration,
+durability and Compose verification belong to the separate stack-integration
+step and have not been verified by this frontend work. There is no automated
+full-stack test here. Playwright runs one worker to avoid simultaneous Chromium
+CPU contention with the existing 50 ms main-thread performance assertion; all
+tests remain enabled. RTL allows 3 seconds for async assertions and Vitest
+15 seconds per workflow test; no coverage exclusions/thresholds were relaxed.
+Mock data in browser
 `localStorage` can survive reloads or restarts until cleared, but it is not
 reliable durable storage. The backend is intended to provide durable storage.
+
+New component coverage lives beside each component:
+`Dashboard.test.tsx`, `ProjectManager.test.tsx`, and `StatusTaskDialog.test.tsx`.
+Existing task component tests remain mock-backed, with expanded workflows in
+`src/features/tasks/organization.test.tsx` and contract matrices in
+`src/mocks/organization.contract.test.ts`. Browser organization workflows are
+in `e2e/organization.spec.ts`; preserved recovery/pagination/performance workflows
+are in `e2e/task-workflows.spec.ts`.
+
+The uncertain task-create review intentionally fetches only the unfiltered first
+20 recent tasks, not the whole collection. A match older than that preview may
+not be shown; review the explicit warning before retrying. No idempotency key
+is defined by the contract. Project lists are unpaginated as specified. Browser
+mock atomicity across tabs depends on Web Locks; Chromium tests support them.

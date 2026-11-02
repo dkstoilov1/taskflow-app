@@ -2,6 +2,9 @@ package com.taskflow.backend.task.api;
 
 import com.taskflow.backend.task.persistence.TaskEntity;
 import com.taskflow.backend.task.persistence.TaskRepository;
+import com.taskflow.backend.task.persistence.TaskSearchCriteria;
+import com.taskflow.backend.project.persistence.ProjectRepository;
+import com.taskflow.backend.project.persistence.ProjectEntity;
 import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.URI;
@@ -51,13 +54,16 @@ class TaskApiIntegrationTest {
     @MockitoBean
     private TaskRepository taskRepository;
 
+    @MockitoBean
+    private ProjectRepository projectRepository;
+
     @Test
     void randomPortServerStartsAndServesTaskPages() throws Exception {
         assertThat(serverAddress).isEqualTo("127.0.0.1");
         UUID id = UUID.randomUUID();
         TaskEntity entity = entity(id, 0, "Startup check", "HTTP request reached the application");
-        when(taskRepository.listAllTasks(any(Pageable.class)))
-                .thenAnswer(invocation -> new PageImpl<>(List.of(entity), invocation.getArgument(0), 1));
+        when(taskRepository.searchTasks(any(TaskSearchCriteria.class), any(Pageable.class)))
+                .thenAnswer(invocation -> new PageImpl<>(List.of(entity), invocation.getArgument(1), 1));
 
         HttpResponse<String> response = send("GET", "/api/tasks?page=0&size=20", null, Map.of());
 
@@ -67,8 +73,8 @@ class TaskApiIntegrationTest {
 
     @Test
     void largeNonnegativePageReturnsAnEmptyPageInsteadOfFailing() throws Exception {
-        when(taskRepository.listAllTasks(any(Pageable.class)))
-                .thenAnswer(invocation -> new PageImpl<>(List.of(), invocation.getArgument(0), 0));
+        when(taskRepository.searchTasks(any(TaskSearchCriteria.class), any(Pageable.class)))
+                .thenAnswer(invocation -> new PageImpl<>(List.of(), invocation.getArgument(1), 0));
 
         HttpResponse<String> response = send("GET", "/api/tasks?page=2147483647&size=100", null, Map.of());
 
@@ -115,10 +121,36 @@ class TaskApiIntegrationTest {
             return task;
         });
         when(taskRepository.findById(id)).thenAnswer(invocation -> Optional.ofNullable(persisted.get()));
-        when(taskRepository.updateDetailsIfVersionMatches(eq(id), anyInt(), anyString(), anyString()))
+        when(taskRepository.replaceIfVersionMatches(
+                eq(id), anyInt(), anyString(), anyString(), any(), anyString(), any(), anyString(), any()))
                 .thenAnswer(invocation -> {
                     TaskEntity task = persisted.get();
-                    task.replaceDetails(invocation.getArgument(2), invocation.getArgument(3));
+                    task.replaceFields(
+                            invocation.getArgument(2),
+                            invocation.getArgument(3),
+                            invocation.getArgument(4),
+                            invocation.getArgument(5),
+                            invocation.getArgument(6),
+                            invocation.getArgument(7),
+                            task.getCompletedAt());
+                    ReflectionTestUtils.setField(task, "version", invocation.<Integer>getArgument(1) + 1);
+                    return 1;
+                });
+        when(taskRepository.updateStatusIfVersionMatches(eq(id), anyInt(), anyString(), any()))
+                .thenAnswer(invocation -> {
+                    TaskEntity task = persisted.get();
+                    String status = invocation.getArgument(2);
+                    java.time.Instant completedAt = "completed".equals(status)
+                            ? task.getStatus().equals("completed") ? task.getCompletedAt() : invocation.getArgument(3)
+                            : null;
+                    task.replaceFields(
+                            task.getTitle(),
+                            task.getDescription(),
+                            task.getDueDate(),
+                            task.getPriority(),
+                            task.getProjectId(),
+                            status,
+                            completedAt);
                     ReflectionTestUtils.setField(task, "version", invocation.<Integer>getArgument(1) + 1);
                     return 1;
                 });
@@ -136,7 +168,15 @@ class TaskApiIntegrationTest {
         assertThat(created.statusCode()).isEqualTo(HttpStatus.CREATED.value());
         assertThat(created.headers().firstValue("Location").orElseThrow()).isEqualTo("/api/tasks/" + id);
         assertThat(created.headers().firstValue("ETag").orElseThrow()).isEqualTo("\"0\"");
-        assertThat(created.body()).contains("\"id\":\"" + id + "\"", "\"title\":\"First task\"", "\"description\":\"\"");
+        assertThat(created.body()).contains(
+                "\"id\":\"" + id + "\"",
+                "\"title\":\"First task\"",
+                "\"description\":\"\"",
+                "\"dueDate\":null",
+                "\"priority\":\"medium\"",
+                "\"projectId\":null",
+                "\"status\":\"active\"",
+                "\"completedAt\":null");
 
         HttpResponse<String> read = send("GET", "/api/tasks/" + id, null, Map.of());
         assertThat(read.statusCode()).isEqualTo(HttpStatus.OK.value());
@@ -164,9 +204,139 @@ class TaskApiIntegrationTest {
                 "DELETE", "/api/tasks/" + id, null, Map.of("If-Match", "\"2\""));
         assertThat(deleted.statusCode()).isEqualTo(HttpStatus.NO_CONTENT.value());
         assertThat(deleted.body()).isEmpty();
-        verify(taskRepository).updateDetailsIfVersionMatches(id, 0, "Second task", "preserved");
-        verify(taskRepository).updateDetailsIfVersionMatches(id, 1, "Second task", "preserved");
+        verify(taskRepository).replaceIfVersionMatches(
+                eq(id), eq(0), eq("Second task"), eq("preserved"), eq(null), eq("medium"),
+                eq(null), eq("active"), any());
+        verify(taskRepository).replaceIfVersionMatches(
+                eq(id), eq(1), eq("Second task"), eq("preserved"), eq(null), eq("medium"),
+                eq(null), eq("active"), any());
         verify(taskRepository).deleteIfVersionMatches(id, 2);
+    }
+
+    @Test
+    void statusPatchChangesOnlyStatusAndReturnsNewVersion() throws Exception {
+        UUID id = UUID.randomUUID();
+        TaskEntity task = entity(id, 4, "Keep title", "Keep description");
+        when(taskRepository.findById(id)).thenReturn(Optional.of(task));
+        when(taskRepository.updateStatusIfVersionMatches(eq(id), eq(4), eq("completed"), any())).thenAnswer(invocation -> {
+            task.replaceFields(
+                    task.getTitle(), task.getDescription(), task.getDueDate(), task.getPriority(),
+                    task.getProjectId(), "completed", invocation.getArgument(3));
+            ReflectionTestUtils.setField(task, "version", 5);
+            return 1;
+        });
+
+        HttpResponse<String> response = send(
+                "PATCH",
+                "/api/tasks/" + id + "/status",
+                "{\"status\":\"completed\"}",
+                Map.of("Content-Type", "application/json", "If-Match", "\"4\""));
+
+        assertThat(response.statusCode()).isEqualTo(HttpStatus.OK.value());
+        assertThat(response.headers().firstValue("ETag").orElseThrow()).isEqualTo("\"5\"");
+        assertThat(response.body()).contains(
+                "\"title\":\"Keep title\"",
+                "\"description\":\"Keep description\"",
+                "\"status\":\"completed\"",
+                "\"version\":5",
+                "\"completedAt\":");
+    }
+
+    @Test
+    void projectCrudAndStatisticsUseRealHttpLayer() throws Exception {
+        UUID projectId = UUID.randomUUID();
+        ProjectEntity project = new ProjectEntity("Release planning");
+        ReflectionTestUtils.setField(project, "id", projectId);
+        when(projectRepository.findAllInDisplayOrder()).thenReturn(List.of(project));
+        when(projectRepository.findById(projectId)).thenReturn(Optional.of(project));
+        when(projectRepository.saveAndFlush(any(ProjectEntity.class))).thenAnswer(invocation -> {
+            ProjectEntity saved = invocation.getArgument(0);
+            ReflectionTestUtils.setField(saved, "id", projectId);
+            return saved;
+        });
+        when(projectRepository.findByIdForUpdate(projectId)).thenReturn(Optional.of(project));
+        when(projectRepository.renameIfVersionMatches(eq(projectId), eq(0), eq("Planning"))).thenAnswer(invocation -> {
+            ReflectionTestUtils.setField(project, "version", 1);
+            return 1;
+        });
+        when(projectRepository.countByNameIgnoreCase("Release planning")).thenReturn(0L);
+        when(projectRepository.countByNameIgnoreCaseAndIdNot("Planning", projectId)).thenReturn(0L);
+        when(projectRepository.deleteIfVersionMatches(projectId, 1)).thenReturn(1);
+        when(taskRepository.unassignTasksFromProject(projectId)).thenReturn(2);
+        when(taskRepository.countCompletedBetween(any(), any())).thenReturn(2L);
+        when(taskRepository.dailyCompletions(any(), any(), anyString())).thenReturn(List.of());
+        when(projectRepository.projectTaskAggregates()).thenReturn(List.of());
+
+        HttpResponse<String> list = send("GET", "/api/projects", null, Map.of());
+        assertThat(list.statusCode()).isEqualTo(HttpStatus.OK.value());
+        assertThat(list.body()).contains("Release planning", projectId.toString());
+
+        HttpResponse<String> read = send("GET", "/api/projects/" + projectId, null, Map.of());
+        assertThat(read.statusCode()).isEqualTo(HttpStatus.OK.value());
+        assertThat(read.headers().firstValue("ETag").orElseThrow()).isEqualTo("\"0\"");
+
+        HttpResponse<String> created = send(
+                "POST", "/api/projects", "{\"name\":\"  Release planning  \"}",
+                Map.of("Content-Type", "application/json"));
+        assertThat(created.statusCode()).isEqualTo(HttpStatus.CREATED.value());
+        assertThat(created.headers().firstValue("Location").orElseThrow()).isEqualTo("/api/projects/" + projectId);
+
+        when(projectRepository.countByNameIgnoreCase(anyString())).thenReturn(1L);
+        HttpResponse<String> duplicate = send(
+                "POST", "/api/projects", "{\"name\":\"release planning\"}",
+                Map.of("Content-Type", "application/json"));
+        assertProblem(duplicate, HttpStatus.CONFLICT);
+        assertThat(duplicate.body()).contains("fieldErrors", "name");
+
+        HttpResponse<String> renamed = send(
+                "PUT", "/api/projects/" + projectId, "{\"name\":\"Planning\"}",
+                Map.of("Content-Type", "application/json", "If-Match", "\"0\""));
+        assertThat(renamed.statusCode()).isEqualTo(HttpStatus.OK.value());
+        assertThat(renamed.headers().firstValue("ETag").orElseThrow()).isEqualTo("\"1\"");
+
+        HttpResponse<String> deleted = send(
+                "DELETE", "/api/projects/" + projectId, null, Map.of("If-Match", "\"1\""));
+        assertThat(deleted.statusCode()).isEqualTo(HttpStatus.NO_CONTENT.value());
+        verify(taskRepository).unassignTasksFromProject(projectId);
+
+        HttpResponse<String> statistics = send("GET", "/api/statistics?timeZone=Europe%2FParis", null, Map.of());
+        assertThat(statistics.statusCode()).isEqualTo(HttpStatus.OK.value());
+        assertThat(statistics.body()).contains(
+                "\"completedToday\":2",
+                "\"completedThisWeek\":2",
+                "\"dailyCompletions\":[",
+                "\"projects\":[]");
+    }
+
+    @Test
+    void invalidFilterAndInvalidTimezoneReturnFieldErrors() throws Exception {
+        HttpResponse<String> filter = send("GET", "/api/tasks?sort=created;drop", null, Map.of());
+        assertProblem(filter, HttpStatus.BAD_REQUEST);
+        assertThat(filter.body()).contains("sort");
+
+        HttpResponse<String> zone = send("GET", "/api/statistics?timeZone=NotAZone", null, Map.of());
+        assertProblem(zone, HttpStatus.BAD_REQUEST);
+        assertThat(zone.body()).contains("timeZone");
+
+        for (String body : List.of(
+                "{\"title\":\"Good\",\"priority\":null}",
+                "{\"title\":\"Good\",\"status\":null}",
+                "{\"title\":\"Good\",\"extra\":true}",
+                "{\"title\":\"Good\",\"dueDate\":\"2026-02-30\"}")) {
+            HttpResponse<String> invalid = send(
+                    "POST", "/api/tasks", body, Map.of("Content-Type", "application/json"));
+            assertProblem(invalid, HttpStatus.BAD_REQUEST);
+        }
+
+        UUID missingProject = UUID.randomUUID();
+        when(projectRepository.findByIdForUpdate(missingProject)).thenReturn(Optional.empty());
+        HttpResponse<String> taskWithMissingProject = send(
+                "POST",
+                "/api/tasks",
+                "{\"title\":\"Good\",\"projectId\":\"" + missingProject + "\"}",
+                Map.of("Content-Type", "application/json"));
+        assertProblem(taskWithMissingProject, HttpStatus.BAD_REQUEST);
+        assertThat(taskWithMissingProject.body()).contains("projectId");
     }
 
     @Test

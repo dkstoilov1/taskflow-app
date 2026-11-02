@@ -8,10 +8,11 @@ import {
   deleteTask,
   listTasks,
   updateTask,
+  changeTaskStatus,
 } from '../../api/client';
-import type { ListTasksParams, TaskInput } from '../../api/types';
+import type { ListTasksParams, TaskInput, Task, TaskStatus } from '../../api/types';
 
-const RECENT_TASKS_PARAMS: Required<ListTasksParams> = {
+const RECENT_TASKS_PARAMS: ListTasksParams = {
   page: 0,
   size: 20,
   q: '',
@@ -19,7 +20,7 @@ const RECENT_TASKS_PARAMS: Required<ListTasksParams> = {
 const RECENT_TASKS_QUERY_KEY = ['tasks', RECENT_TASKS_PARAMS] as const;
 
 export function useTasks(
-  params: Required<ListTasksParams>,
+  params: ListTasksParams,
   enabled = true,
 ) {
   return useQuery({
@@ -53,7 +54,7 @@ export function useCreateTask() {
   return useMutation({
     mutationFn: (input: TaskInput) => createTask(input),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      await queryClient.invalidateQueries();
     },
     retry: false,
   });
@@ -66,14 +67,16 @@ export function useUpdateTask() {
       id,
       version,
       input,
+      previous,
     }: {
       id: string;
       version: number;
       input: TaskInput;
-    }) => updateTask(id, version, input),
+      previous?: Task;
+    }) => updateTask(id, version, input, previous),
     onSuccess: async (task) => {
       queryClient.setQueryData(['task', task.id], task);
-      await queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      await queryClient.invalidateQueries();
     },
     retry: false,
   });
@@ -86,8 +89,17 @@ export function useDeleteTask() {
       deleteTask(id, version),
     onSuccess: async (_result, variables) => {
       queryClient.removeQueries({ queryKey: ['task', variables.id] });
-      await queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      await queryClient.invalidateQueries();
     },
+    retry: false,
+  });
+}
+
+export function useChangeTaskStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({task, status}: {task: Task; status: TaskStatus}) => changeTaskStatus(task, status),
+    onSuccess: async () => { await queryClient.invalidateQueries(); },
     retry: false,
   });
 }

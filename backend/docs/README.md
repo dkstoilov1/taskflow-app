@@ -9,28 +9,33 @@ contract.
 
 The application is organized by feature and layer:
 
-- `com.taskflow.backend.task.api`: REST controller and JSON records, Bean
-  Validation constraints, and OpenAPI operation documentation.
-- `com.taskflow.backend.task.service`: transactional use cases, request
-  normalization, precondition parsing, and response mapping.
-- `com.taskflow.backend.task.persistence`: JPA entity, Spring Data repository,
-  guarded mutation queries, and PostgreSQL literal-search fragment.
+- `com.taskflow.backend.task.api`: task REST controller and request/response
+  DTOs, Bean Validation constraints, and OpenAPI operation documentation.
+- `com.taskflow.backend.task.service`: transactional task use cases, timezone
+  boundary calculation, project-assignment locking, and ETag preconditions.
+- `com.taskflow.backend.task.persistence`: JPA task entity, version-guarded
+  writes, database-side filter/sort/page/search queries, and completion counts.
+- `com.taskflow.backend.project`: project REST API, transactional CRUD service,
+  entity, and row-locking/aggregate repository.
+- `com.taskflow.backend.statistics`: statistics response schemas, API endpoint,
+  and timezone-aware service that combines database aggregates.
 - `com.taskflow.backend.shared`: Unicode utilities, validation annotation,
   local-origin guard, API exceptions, and RFC 9457 error mapping.
-- `com.taskflow.backend.config`: OpenAPI document metadata.
+- `com.taskflow.backend.config`: OpenAPI metadata, strict JSON handling, and
+  injectable UTC server clock.
 
 Request flow:
 
 ```mermaid
 flowchart LR
-  Client --> Origin[Origin protection]
-  Origin --> Controller[TaskController]
-  Controller --> Validation[Bean Validation]
-  Validation --> Service[Transactional TaskService]
-  Service --> Repository[Spring Data JPA]
-  Repository --> PostgreSQL[(PostgreSQL)]
-  Controller --> Advice[ProblemDetailsHandler]
-  Service --> Advice
+  Client --> Origin[Origin and Host protection]
+  Origin --> Controllers[Task, Project, Statistics controllers]
+  Controllers --> Validation[Bean Validation and request parsing]
+  Validation --> Services[Transactional feature services]
+  Services --> Repositories[Spring Data JPA and query fragments]
+  Repositories --> PostgreSQL[(PostgreSQL)]
+  Controllers --> Advice[ProblemDetailsHandler]
+  Services --> Advice
 ```
 
 The server has no login or multi-user identity. It is intended for local
@@ -100,14 +105,34 @@ application logic is excluded.
   build or test checks.
 - Postman v2.1 collection:
   [`../postman/taskflow.postman_collection.json`](../postman/taskflow.postman_collection.json).
-  It covers all five CRUD methods and representative errors; write requests are
-  guarded so the collection only mutates a task it created itself.
+  It covers all 12 task/project/statistics method-path pairs, representative
+  errors, and chained ETags. Mutation scripts guard collection-owned task and
+  project IDs.
 
-The API supports paginated list/search, read, create, full replacement of
-title/description, and permanent delete. Search is case-insensitive literal
-substring matching; `%`, `_`, and backslash are escaped before PostgreSQL
-`ILIKE`. Blank search is treated as no search. Results are ordered by
-`created_at DESC, id DESC`.
+The API supports paginated task search and filtering, task reads/create/full
+replacement/status changes/delete, project CRUD, and aggregate statistics.
+Task-only title/description clients remain compatible: omitted date/project
+default to null, priority defaults to medium, and status defaults to active.
+Search is a case-insensitive literal substring match; `%`, `_`, and backslash
+are escaped before PostgreSQL `ILIKE`. Blank search is treated as no search.
+Filtering, ordering, counts, and pagination run in PostgreSQL. All sort keys
+use stable `created_at DESC, id DESC` tie-breakers; due sorts place null dates
+last.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/tasks` | Search/filter/sort and page task results on the server. |
+| `GET` | `/api/tasks/{id}` | Read a task with its strong ETag. |
+| `POST` | `/api/tasks` | Create a task and return Location/ETag. |
+| `PUT` | `/api/tasks/{id}` | Replace editable fields with required If-Match. |
+| `PATCH` | `/api/tasks/{id}/status` | Complete/reopen without replacing other fields. |
+| `DELETE` | `/api/tasks/{id}` | Delete with required If-Match. |
+| `GET` | `/api/projects` | List all projects, including empty projects. |
+| `GET` | `/api/projects/{id}` | Read a project and strong ETag. |
+| `POST` | `/api/projects` | Create a case-insensitively unique project. |
+| `PUT` | `/api/projects/{id}` | Rename with required If-Match. |
+| `DELETE` | `/api/projects/{id}` | Unassign/version affected tasks, then delete with If-Match. |
+| `GET` | `/api/statistics` | Return timezone-aware daily, weekly, and per-project totals. |
 
 ## Data model and migrations
 
@@ -117,13 +142,27 @@ timestamp. Check constraints reject blank titles and negative versions.
 Migration indexes include the stable list-order index and GIN trigram indexes
 on title and description. The migration enables PostgreSQL `pg_trgm`.
 
+`V2__add_task_organization_and_statistics.sql` creates versioned projects and
+adds task due date, priority, optional project UUID, status, and completion
+timestamp. Existing V1 rows are preserved and receive the migration defaults
+(active, medium, null deadline/project/completion time) without changing their
+IDs, text, versions, or creation ordering. Constraints validate supported
+status/priority values and completion timestamp consistency. A unique
+case-insensitive project-name index and task date/project indexes support the
+query contract. Project deletion explicitly unassigns tasks and increments
+their versions before removing the project; the FK is restrictive as a final
+guard against silent task mutation.
+
 Create never accepts a user-provided ID or version. Update and delete accept
-the task ID in the path and the expected version in `If-Match`. Updates use a
-guarded PostgreSQL statement that changes the editable fields and increments
-`version` only when both the task ID and expected version match. Deletes use
-the same ID/version predicate. This makes version check and mutation atomic,
-including no-op replacements. A zero-row mutation is reported as `412`; an
-absent task discovered before mutation is `404`.
+the resource ID in the path and the expected version in `If-Match`. Mutations
+use guarded PostgreSQL statements that change fields and increment `version`
+only when both ID and expected version match. Status writes increment version
+even when status is unchanged; unchanged completed tasks retain their
+completion instant, reopening clears it, and completing again records the
+injectable server clock. A zero-row mutation is `412`; an absent resource is
+`404`. Project row locks serialize assignment/rename/deletion, and task
+conditional updates prevent deletion/unassignment from overwriting concurrent
+task writes.
 
 ## Validation and errors
 
@@ -131,6 +170,13 @@ absent task discovered before mutation is `404`.
   nonblank, and is limited to 200 Unicode code points.
 - Description defaults from missing/null to `""`, preserves whitespace, and
   is limited to 10,000 Unicode code points.
+- Due dates are strict `YYYY-MM-DD` calendar dates (years 0001–9999), parsed
+  without timezone conversion. Priority is `low|medium|high`; status is
+  `active|completed`. Omitted values default for title/description-only
+  clients; explicit null priority/status values are rejected. Project UUID
+  references must exist or return a `400` field error.
+- Project names use the same trimming rules, require 1–100 Unicode code
+  points, and are unique without regard to case. Duplicate names return 409.
 - Page defaults to `0`, size defaults to `20` and must be 1–100, and `q` is
   trimmed and limited to 200 code points. Invalid values are rejected, never
   clamped. List and search use native `LIMIT`/`OFFSET` queries with 64-bit
@@ -139,6 +185,14 @@ absent task discovered before mutation is `404`.
 - `If-Match` must be a quoted non-negative decimal integer. Missing headers
   produce `428`; malformed headers produce `400`; stale versions produce
   `412`.
+- Task list filters and sort names are explicit allowlists. Relative date
+  filters use the server clock in the requested IANA `timeZone` (UTC by
+  default); invalid zones are rejected. Due dates remain date-only values.
+- Statistics count currently completed tasks using their latest completion
+  timestamp, include zeroes for all seven local calendar dates ending today,
+  and calculate per-project rates with one decimal place. DST days are
+  bounded by timezone-aware local midnights. Empty projects appear with a
+  zero rate; unassigned tasks count globally but not in project rates.
 - Errors use `application/problem+json` and RFC 9457 Problem Details. Field
   validation may include a `fieldErrors` map. Unexpected failures are logged
   server-side and returned without stack traces, SQL, connection details, or
@@ -168,6 +222,19 @@ serialization, origin checks, controllers, services, and error mapping. It
 does not validate Hibernate mappings against PostgreSQL, execute Flyway, prove
 database persistence across process/container restart, or exercise transaction
 isolation against concurrent database sessions.
+
+Run the no-server Postman checks from `backend\postman`:
+
+```powershell
+python verify_collection.py
+node test_collection_scripts.js
+```
+
+The JaCoCo gate measures BUNDLE line coverage at 0.80. Its only exclusion is
+`com/taskflow/backend/TaskFlowApplication.class` (the application entry point);
+no service or feature code is excluded. The build does not include a
+SonarJava Cognitive Complexity analyzer, so per-method scores are reported as
+unverified unless a compatible analyzer is run separately.
 
 Separate manual checks against an isolated, password-protected PostgreSQL
 17.11 instance on Windows exercised Flyway migration, schema validation,

@@ -1,4 +1,4 @@
-import type { Task, TaskInput } from '../api/types';
+import type { Task, TaskInput, Project } from '../api/types';
 
 export interface StoredTask extends Task {
   createdAt: number;
@@ -10,6 +10,7 @@ interface MockControls {
 }
 
 const tasks = new Map<string, StoredTask>();
+const projects = new Map<string, Project>();
 const controls: MockControls = { latencyMs: 0, nextFailure: undefined };
 const STORE_STORAGE_KEY = 'taskflow.mock.tasks';
 const STORE_REVISION_KEY = 'taskflow.mock.tasks.revision';
@@ -30,16 +31,21 @@ function syncFromBrowserStorage(): void {
   const serialized = window.localStorage.getItem(STORE_STORAGE_KEY);
   if (serialized === null) {
     tasks.clear();
+    projects.clear();
     lastSeenRevision = revision;
     return;
   }
   try {
-    const records = JSON.parse(serialized) as StoredTask[];
+    const snapshot = JSON.parse(serialized) as {tasks: StoredTask[]; projects: Project[]};
+    const records = Array.isArray(snapshot) ? snapshot as StoredTask[] : snapshot.tasks;
     tasks.clear();
-    for (const task of records) tasks.set(normalizeTaskId(task.id), task);
+    for (const task of records) tasks.set(normalizeTaskId(task.id), {...defaultFields(), ...task});
+    projects.clear();
+    for (const project of snapshot.projects ?? []) projects.set(project.id.toLowerCase(), project);
   } catch (error) {
     console.error('Could not restore the browser mock task store.', error);
     tasks.clear();
+    projects.clear();
     window.localStorage.removeItem(STORE_STORAGE_KEY);
   }
   lastSeenRevision = revision;
@@ -49,7 +55,7 @@ function persistToBrowserStorage(): void {
   if (!browserPersistenceEnabled) return;
   window.localStorage.setItem(
     STORE_STORAGE_KEY,
-    JSON.stringify([...tasks.values()]),
+    JSON.stringify({tasks: [...tasks.values()], projects: [...projects.values()]}),
   );
   // Publish the revision last; readers share the store lock with writers.
   const currentRevision = Number(
@@ -77,6 +83,7 @@ export async function withMockStoreLock<T>(
 
 export function resetMockStore(): void {
   tasks.clear();
+  projects.clear();
   controls.latencyMs = 0;
   controls.nextFailure = undefined;
   // Keep the revision monotonic so a reset followed by a seed cannot reuse
@@ -84,10 +91,10 @@ export function resetMockStore(): void {
   persistToBrowserStorage();
 }
 
-export function seedMockTasks(items: StoredTask[]): void {
+export function seedMockTasks(items: (Pick<StoredTask, 'id' | 'title' | 'description' | 'version' | 'createdAt'> & Partial<StoredTask>)[]): void {
   tasks.clear();
   for (const task of items) {
-    tasks.set(normalizeTaskId(task.id), { ...task });
+    tasks.set(normalizeTaskId(task.id), { ...defaultFields(), ...task });
   }
   persistToBrowserStorage();
 }
@@ -132,6 +139,8 @@ export function createMockTask(id: string, input: TaskInput): StoredTask {
     id,
     version: 0,
     createdAt: Date.now(),
+    ...editableFields(input),
+    completedAt: input.status === 'completed' ? new Date().toISOString() : null,
   };
   tasks.set(normalizeTaskId(id), created);
   persistToBrowserStorage();
@@ -150,6 +159,9 @@ export function replaceMockTask(
     ...current,
     title: input.title,
     description: input.description ?? '',
+    ...editableFields(input),
+    completedAt: (input.status ?? 'active') === 'active' ? null :
+      current.status === 'completed' ? current.completedAt : new Date().toISOString(),
     version: current.version + 1,
   };
   tasks.set(normalizedId, updated);
@@ -162,4 +174,44 @@ export function removeMockTask(id: string): boolean {
   const removed = tasks.delete(normalizeTaskId(id));
   if (removed) persistToBrowserStorage();
   return removed;
+}
+
+function defaultFields() {
+  return {dueDate: null, priority: 'medium' as const, projectId: null, status: 'active' as const, completedAt: null};
+}
+
+function editableFields(input: TaskInput) {
+  return {dueDate: input.dueDate ?? null, priority: input.priority ?? 'medium',
+    projectId: input.projectId?.toLowerCase() ?? null, status: input.status ?? 'active'};
+}
+
+export function seedMockProjects(items: Project[]): void {
+  projects.clear();
+  for (const project of items) projects.set(project.id.toLowerCase(), {...project});
+  persistToBrowserStorage();
+}
+
+export function allMockProjects(): Project[] {
+  syncFromBrowserStorage();
+  return [...projects.values()].sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()) || a.id.localeCompare(b.id));
+}
+
+export function findMockProject(id: string): Project | undefined {
+  syncFromBrowserStorage();
+  return projects.get(id.toLowerCase());
+}
+
+export function writeMockProject(project: Project): void {
+  syncFromBrowserStorage();
+  projects.set(project.id.toLowerCase(), project);
+  persistToBrowserStorage();
+}
+
+export function removeMockProject(id: string): void {
+  syncFromBrowserStorage();
+  projects.delete(id.toLowerCase());
+  for (const [taskId, task] of tasks) {
+    if (task.projectId?.toLowerCase() === id.toLowerCase()) tasks.set(taskId, {...task, projectId: null, version: task.version + 1});
+  }
+  persistToBrowserStorage();
 }

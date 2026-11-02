@@ -21,6 +21,7 @@ const TASK: Task & { createdAt: number } = {
   title: 'Review the launch plan',
   description: 'Keep the spacing\nexactly as entered.',
   version: 0,
+  dueDate: null, priority: 'medium', projectId: null, status: 'active', completedAt: null,
   createdAt: 1,
 };
 
@@ -387,7 +388,6 @@ describe('TaskFormDialog', () => {
 
   it('requires a successful recent-task refresh and an explicit choice before retrying create', async () => {
     const user = userEvent.setup();
-    failNextMockRequest('network');
     let refreshes = 0;
     const onSaved = vi.fn();
     renderWithQuery(
@@ -403,6 +403,7 @@ describe('TaskFormDialog', () => {
       />,
     );
     await user.type(screen.getByLabelText('Title'), 'Possibly created');
+    failNextMockRequest('network');
     await user.click(screen.getByRole('button', { name: 'Add task' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'outcome is uncertain',
@@ -438,7 +439,6 @@ describe('TaskFormDialog', () => {
       createdAt: 5,
     };
     seedMockTasks([existing]);
-    failNextMockRequest('network');
     const onSaved = vi.fn();
     renderWithQuery(
       <TaskFormDialog
@@ -452,6 +452,7 @@ describe('TaskFormDialog', () => {
 
     await user.type(screen.getByLabelText('Title'), existing.title);
     await user.type(screen.getByLabelText('Description'), existing.description);
+    failNextMockRequest('network');
     await user.click(screen.getByRole('button', { name: 'Add task' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
       /create outcome is uncertain/i,
@@ -504,7 +505,6 @@ describe('TaskFormDialog', () => {
   it('requires a fresh successful review after an uncertain update before retrying', async () => {
     const user = userEvent.setup();
     seedMockTasks([TASK]);
-    failNextMockRequest('network');
     const onSaved = vi.fn();
     let putCount = 0;
     const onRequestStart = ({ request }: { request: Request }) => {
@@ -526,6 +526,7 @@ describe('TaskFormDialog', () => {
       const title = screen.getByLabelText('Title');
       await user.clear(title);
       await user.type(title, 'Safe draft after uncertain save');
+      failNextMockRequest('network');
       await user.click(screen.getByRole('button', { name: 'Save changes' }));
       expect(await screen.findByRole('alert')).toHaveTextContent(
         /save outcome is uncertain/i,
@@ -860,7 +861,6 @@ describe('TaskFormDialog', () => {
   it('does not advance an uncertain update version until the user confirms an overwrite', async () => {
     const user = userEvent.setup();
     seedMockTasks([TASK]);
-    failNextMockRequest('network');
     const onSaved = vi.fn();
     const onReloaded = vi.fn();
     renderWithQuery(
@@ -878,6 +878,7 @@ describe('TaskFormDialog', () => {
     const title = screen.getByLabelText('Title');
     await user.clear(title);
     await user.type(title, 'My safe retry draft');
+    failNextMockRequest('network');
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
       /save outcome is uncertain/i,

@@ -124,6 +124,8 @@ export function DeleteTaskDialog({
           </AlertDialog.Title>
           <AlertDialog.Description className="dialog-intro">
             “{task?.title}” will be permanently removed. This can’t be undone.
+            {' '}Deadline: {task?.dueDate ?? 'None'}; priority: {task?.priority};
+            project: {task?.projectId ?? 'Unassigned'}; status: {task?.status}.
           </AlertDialog.Description>
           {error ? (
             <div className="form-error" role="alert">

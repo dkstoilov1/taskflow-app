@@ -24,6 +24,24 @@ EXPECTED_ERRORS = {
     "Error: missing task (404)": ("GET", "/api/tasks/00000000-0000-4000-8000-000000000001", 404),
     "Error: missing If-Match (428)": ("PUT", OWN_TASK_PATH, 428),
     "Error: stale If-Match (412)": ("PUT", OWN_TASK_PATH, 412),
+    "Error: duplicate project name (409)": ("POST", "/api/projects", 409),
+    "Error: invalid timezone (400)": ("GET", "/api/statistics", 400),
+    "Error: invalid task status (400)": ("PATCH", OWN_TASK_PATH + "/status", 400),
+    "Error: missing project If-Match (428)": ("PUT", "/api/projects/{{taskflowProjectId}}", 428),
+}
+EXPECTED_ROUTES = {
+    ("GET", "/api/tasks"),
+    ("GET", "/api/tasks/{{taskflowCreatedTaskId}}"),
+    ("POST", "/api/tasks"),
+    ("PUT", "/api/tasks/{{taskflowCreatedTaskId}}"),
+    ("PATCH", "/api/tasks/{{taskflowCreatedTaskId}}/status"),
+    ("DELETE", "/api/tasks/{{taskflowCreatedTaskId}}"),
+    ("GET", "/api/projects"),
+    ("GET", "/api/projects/{{taskflowProjectId}}"),
+    ("POST", "/api/projects"),
+    ("PUT", "/api/projects/{{taskflowProjectId}}"),
+    ("DELETE", "/api/projects/{{taskflowProjectId}}"),
+    ("GET", "/api/statistics"),
 }
 
 
@@ -115,6 +133,10 @@ def main() -> int:
         "taskflowTaskVersion",
         "taskflowTaskEtag",
         "taskflowPreviousEtag",
+        "taskflowProjectId",
+        "taskflowProjectName",
+        "taskflowProjectEtag",
+        "taskflowProjectPreviousEtag",
     ):
         if key not in variables:
             fail(f"Missing collection variable {key!r}.")
@@ -132,7 +154,8 @@ def main() -> int:
             fail(f"Request {item['name']!r} headers must be an array.")
         method = request.get("method", "").upper()
         headers = headers_by_name(request)
-        if method in ("POST", "PUT"):
+        path = request_path(request)
+        if method in ("POST", "PUT", "PATCH"):
             if headers.get("content-type") != "application/json":
                 fail(f"{item['name']!r} must send Content-Type: application/json.")
             body = request.get("body", {})
@@ -142,11 +165,19 @@ def main() -> int:
                 body_value = json.loads(body.get("raw", ""))
             except json.JSONDecodeError:
                 fail(f"{item['name']!r} must include a valid JSON example body.")
-            if not isinstance(body_value, dict) or not isinstance(body_value.get("title"), str):
-                fail(f"{item['name']!r} must include a task title in its JSON body.")
-            if "description" not in body_value:
-                fail(f"{item['name']!r} must include a description field in its JSON body.")
-        if method == "DELETE" and not headers.get("if-match"):
+            if not isinstance(body_value, dict):
+                fail(f"{item['name']!r} must contain a JSON object body.")
+            if path.startswith("/api/projects"):
+                if method in ("POST", "PUT") and not isinstance(body_value.get("name"), str):
+                    fail(f"{item['name']!r} must include a project name.")
+            elif method == "PATCH":
+                if body_value.get("status") not in ("active", "completed", "paused"):
+                    fail(f"{item['name']!r} must include a representative task status.")
+            else:
+                if not isinstance(body_value.get("title"), str) or "description" not in body_value:
+                    fail(f"{item['name']!r} must include task title and description fields.")
+        if method in ("PUT", "DELETE", "PATCH") and not headers.get("if-match") \
+                and "missing" not in item.get("name", "").lower():
             fail(f"{item['name']!r} must send the required If-Match header.")
 
     for name, (method, path) in EXPECTED_CORE.items():
@@ -166,6 +197,14 @@ def main() -> int:
             fail(f"Error request {name!r} has an unexpected method or path.")
         if f"pm.response.to.have.status({status})" not in script_text(item, "test"):
             fail(f"Error request {name!r} does not assert HTTP {status}.")
+
+    actual_routes = {
+        (item["request"]["method"].upper(), request_path(item["request"]))
+        for item in requests
+        if request_path(item["request"]).startswith(("/api/tasks", "/api/projects", "/api/statistics"))
+    }
+    if not EXPECTED_ROUTES.issubset(actual_routes):
+        fail(f"Missing controller route/method pairs: {sorted(EXPECTED_ROUTES - actual_routes)}")
 
     for item in requests:
         path = request_path(item["request"]).lower()
@@ -224,13 +263,20 @@ def main() -> int:
 
     write_requests = [
         item for item in requests
-        if item["request"].get("method", "").upper() in ("PUT", "DELETE")
+        if item["request"].get("method", "").upper() in ("PUT", "DELETE", "PATCH")
     ]
     for item in write_requests:
-        if request_path(item["request"]) != OWN_TASK_PATH:
-            fail(f"Write request {item['name']!r} must target only the collection-created task.")
+        path = request_path(item["request"])
+        if path not in (
+            OWN_TASK_PATH,
+            OWN_TASK_PATH + "/status",
+            "/api/projects/{{taskflowProjectId}}",
+        ) and "invalid" not in item["name"].lower() and "missing" not in item["name"].lower() and "stale" not in item["name"].lower():
+            fail(f"Write request {item['name']!r} must target a collection-owned task or project.")
         pre_request = script_text(item, "prerequest")
-        if "taskflowOwnedTaskId" not in pre_request or "pm.execution.skipRequest()" not in pre_request:
+        is_project_write = "/api/projects/" in path
+        owner_key = "taskflowProjectId" if is_project_write else "taskflowOwnedTaskId"
+        if owner_key not in pre_request or "pm.execution.skipRequest()" not in pre_request:
             fail(f"Write request {item['name']!r} must guard collection ownership before sending.")
 
     missing_match = by_name["Error: missing If-Match (428)"]
@@ -239,6 +285,16 @@ def main() -> int:
     stale_match = by_name["Error: stale If-Match (412)"]
     if headers_by_name(stale_match["request"]).get("if-match") != "{{taskflowPreviousEtag}}":
         fail("The stale-version example must use the previous ETag from this collection's update.")
+
+    status_update = by_name["Complete collection-owned task"]
+    if headers_by_name(status_update["request"]).get("if-match") != "{{taskflowTaskEtag}}":
+        fail("Status PATCH must use the current chained task ETag.")
+    project_update = by_name["Rename collection-owned project"]
+    if headers_by_name(project_update["request"]).get("if-match") != "{{taskflowProjectEtag}}":
+        fail("Project rename must use the current chained project ETag.")
+    project_delete = by_name["Delete collection-owned project"]
+    if headers_by_name(project_delete["request"]).get("if-match") != "{{taskflowProjectEtag}}":
+        fail("Project deletion must use the current chained project ETag.")
 
     collection_script = "\n".join(
         line
@@ -256,7 +312,7 @@ def main() -> int:
         fail("Collection pre-request guard must restrict requests to query/fragment-free loopback URLs.")
 
     print(
-        "PASS: valid Postman v2.1 JSON; 5/5 CRUD method/path pairs; "
+        "PASS: valid Postman v2.1 JSON; 12/12 controller method/path pairs; "
         f"{len(EXPECTED_ERRORS)}/{len(EXPECTED_ERRORS)} representative error requests; "
         "required headers, chained owned-task/version guards, and no documentation endpoints."
     )

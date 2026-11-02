@@ -4,6 +4,27 @@ TaskFlow is a local, single-user task manager. The canonical API behavior is
 defined in [`docs/api.md`](docs/api.md); the frontend implementation and its
 mock are documented in [`frontend/README.md`](frontend/README.md).
 
+## Task organization and productivity
+
+- Create, edit, delete, complete, and reopen tasks with a title, description,
+  optional due date, priority, and optional project.
+- Start on the dashboard for today's tasks, overdue items, upcoming deadlines,
+  daily/weekly completion counts, and project completion rates.
+- Switch between Today (including overdue active tasks), Upcoming, All Tasks,
+  and Completed. Search, combine status/priority/due-date/project filters, and
+  sort by creation time, due date, priority, or status.
+- Create, rename, and delete projects. Deleting a project leaves its tasks
+  unassigned; it does not delete them.
+- Deadlines are calendar dates in your local timezone. Weeks run Monday–Sunday.
+  Statistics reflect currently completed tasks, not an immutable activity log:
+  reopening or deleting a task removes its completion from the counts.
+
+Tasks default to active with medium priority. Undated tasks remain visible in
+All Tasks but not Today or Upcoming. Data is saved by the local backend in
+PostgreSQL, not in browser storage; restarting services with the same database
+volume retains tasks, projects, and completion timestamps. The mock is not a
+substitute for durable storage.
+
 ## Project status
 
 The React frontend and Spring Boot backend are implemented against the

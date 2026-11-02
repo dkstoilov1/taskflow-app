@@ -12,6 +12,7 @@ const TASK: Task = {
   title: 'Review the launch plan',
   description: 'Check the final notes.',
   version: 0,
+  dueDate: null, priority: 'medium', projectId: null, status: 'active', completedAt: null,
 };
 
 function ApiBackedTaskListHarness() {

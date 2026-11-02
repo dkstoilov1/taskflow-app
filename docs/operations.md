@@ -49,6 +49,23 @@ $env:Path += ";$env:LOCALAPPDATA\TaskFlow\PostgreSQL\17\bin"
 
 ## Persistence across restart
 
+Task metadata (due date, priority, status, project assignment, and completion
+timestamp) and project names are stored in PostgreSQL alongside task text.
+Statistics are calculated from that persisted data, so they survive restarts
+without a separate statistics store. Reopening/deleting tasks intentionally
+changes those statistics.
+
+Flyway applies versioned schema migrations when the backend starts. Existing
+title/description-only tasks receive active status, medium priority, and no
+deadline, project, or completion timestamp. Do not edit an applied migration or
+reset Flyway history to resolve a schema mismatch. Take a backup before
+upgrading a database whose contents matter.
+
+The current development database was explicitly identified as disposable test
+data for this feature implementation. That permission is not a general
+instruction to clear future data, remove volumes, or reset other databases.
+Normal startup and migration do not require deleting task data.
+
 The named volume stores the database data independently from the container. A normal stop/start or container recreation keeps the data:
 
 ```powershell
@@ -59,6 +76,26 @@ docker compose up -d
 After application data has been created, verify the task count and representative fields before and after a restart. A manual check with Docker Desktop, WSL 2, and PostgreSQL 17.11 in the Compose container recreated the database container while preserving its named volume. The same task ID, Unicode title, multiline description, creation timestamp, version, and ETag were present afterward, and the backend and frontend proxy reconnected.
 
 Do not use `docker compose down --volumes`, `docker volume rm`, or another volume-deleting command as routine shutdown or troubleshooting instructions. A persistent volume is not a backup and does not protect against hardware failure, volume corruption, or an intentional permanent task deletion.
+
+### Feature persistence smoke check
+
+Use disposable records or a dedicated verification database, not important tasks:
+
+1. Create a project and a task with a description, deadline, and high priority.
+2. Complete the task. Record its ID, project assignment, version, completion
+   timestamp, and the dashboard's completion counts.
+3. Restart the backend with the same database configuration. Verify the task,
+   project, and statistics still match; a date rollover can legitimately change
+   today's/week's counts.
+4. Stop/start PostgreSQL without removing its volume, restart the backend if
+   needed, and repeat the checks.
+5. Reopen the task and verify it leaves Completed and the completion counts.
+   Delete the project and verify the task survives as unassigned.
+
+The browser mock and mocked-repository backend tests cannot establish actual
+database persistence or PostgreSQL transaction/concurrency behavior. Verify
+those with the real local stack. Project deletion also changes affected task
+versions, so another tab holding an older version must reload before editing.
 
 ## Create a backup
 

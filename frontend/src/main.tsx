@@ -28,6 +28,9 @@ async function start(): Promise<void> {
       seed: async (tasks) => {
         await sendControl({ operation: 'seed', tasks });
       },
+      seedProjects: async (projects) => {
+        await sendControl({operation: 'seedProjects', projects});
+      },
       setLatency: async (milliseconds) => {
         await sendControl({ operation: 'latency', milliseconds });
       },

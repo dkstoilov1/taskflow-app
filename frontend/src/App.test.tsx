@@ -7,7 +7,7 @@ describe('App', () => {
     renderWithQuery(<App />);
 
     expect(
-      await screen.findByRole('heading', { name: 'A fresh start.' }),
+      await screen.findByRole('heading', { name: 'Your focus, at a glance' }),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /new task/i })).toBeVisible();
   });

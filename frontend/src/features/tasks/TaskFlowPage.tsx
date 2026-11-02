@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '../../api/client';
-import type { Task } from '../../api/types';
+import type { Task, TaskView, ListTasksParams } from '../../api/types';
+import { browserTimeZone } from '../../api/calendar';
+import { Dashboard } from '../dashboard/Dashboard';
+import { useRelativeDateRefresh } from '../dashboard/useStatistics';
+import { ProjectManager } from '../projects/ProjectManager';
+import { useProjects } from '../projects/useProjects';
+import { StatusTaskDialog } from './StatusTaskDialog';
 import { DeleteTaskDialog } from './DeleteTaskDialog';
 import { TaskFormDialog } from './TaskFormDialog';
 import { TaskList } from './TaskList';
@@ -13,13 +20,20 @@ function codePointLength(value: string): number {
   return Array.from(value).length;
 }
 
-export function TaskFlowPage() {
+export function TaskFlowPage({initialView = 'dashboard'}: {initialView?: TaskView | 'dashboard'}) {
+  const queryClient = useQueryClient();
+  const [view, setView] = useState<TaskView | 'dashboard'>(initialView);
+  const [filters, setFilters] = useState<ListTasksParams>({});
+  const projectsQuery = useProjects();
+  const timeZone = browserTimeZone();
+  useRelativeDateRefresh();
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(0);
   const [formOpen, setFormOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task>();
   const [deletingTask, setDeletingTask] = useState<Task>();
+  const [statusTask, setStatusTask] = useState<Task>();
   const [announcement, setAnnouncement] = useState('');
   const searchLength = codePointLength(search.trim());
   const normalizedSearch = debouncedSearch.trim();
@@ -27,8 +41,8 @@ export function TaskFlowPage() {
   const queryEnabled =
     searchLength <= 200 && debouncedSearchLength <= 200;
   const query = useTasks(
-    { page, size: PAGE_SIZE, q: normalizedSearch },
-    queryEnabled,
+    { ...filters, view: view === 'dashboard' ? 'all' : view, timeZone, page, size: PAGE_SIZE, q: normalizedSearch },
+    queryEnabled && view !== 'dashboard',
   );
   const fetchRecentTasks = useRecentTasks();
   const tasks = query.data?.items ?? [];
@@ -96,9 +110,17 @@ export function TaskFlowPage() {
     setSearch('');
     setDebouncedSearch('');
     setPage(0);
+    setView('all');
+    setFilters({});
     setAnnouncement(
       `Found “${task.title}” in recent tasks. No duplicate was created.`,
     );
+  }
+
+  function navigate(params: ListTasksParams) {
+    setView(params.view ?? 'all');
+    setFilters({status: params.status, due: params.due, sort: params.sort});
+    setPage(0); setSearch(''); setDebouncedSearch('');
   }
 
   function finishDelete(task: Task): void {
@@ -156,10 +178,38 @@ export function TaskFlowPage() {
           </button>
         </div>
 
+        <nav className="view-navigation" aria-label="Task views">
+          {([['dashboard', 'Dashboard'], ['today', 'Today'], ['upcoming', 'Upcoming'], ['all', 'All Tasks'], ['completed', 'Completed']] as const).map(([key, label]) =>
+            <button type="button" className="button button-secondary" key={key} aria-current={view === key ? 'page' : undefined}
+              onClick={() => {setView(key); setPage(0);}}>{label}</button>)}
+        </nav>
+        {view === 'dashboard' ? <Dashboard timeZone={timeZone} onNavigate={navigate} onEdit={startEdit} onDelete={setDeletingTask} onStatusChange={setStatusTask} /> :
         <section className="task-section" aria-label="Your task list">
+          <div className="filter-toolbar">
+            <label>Status filter<select value={filters.status ?? ''} onChange={(event) => {setFilters({...filters, status: event.target.value as ListTasksParams['status'] || undefined}); setPage(0);}}>
+              <option value="">All statuses</option><option value="active">Active</option><option value="completed">Completed</option>
+            </select></label>
+            <label>Priority filter<select value={filters.priority ?? ''} onChange={(event) => {setFilters({...filters, priority: event.target.value as ListTasksParams['priority'] || undefined}); setPage(0);}}>
+              <option value="">All priorities</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
+            </select></label>
+            <label>Deadline filter<select value={filters.due ?? ''} onChange={(event) => {setFilters({...filters, due: event.target.value as ListTasksParams['due'] || undefined}); setPage(0);}}>
+              <option value="">Any deadline</option><option value="today">Today</option><option value="this_week">This week (Mon–Sun)</option><option value="overdue">Overdue</option>
+            </select></label>
+            <label>Project filter<select value={filters.project ?? ''} onChange={(event) => {setFilters({...filters, project: event.target.value || undefined}); setPage(0);}}>
+              <option value="">All projects</option><option value="unassigned">Unassigned</option>
+              {filters.project && filters.project !== 'unassigned' && !projectsQuery.data?.some((project) => project.id === filters.project) ? <option value={filters.project}>Unavailable project</option> : null}
+              {projectsQuery.data?.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}
+            </select></label>
+            <label>Sort tasks<select value={filters.sort ?? 'created_desc'} onChange={(event) => {setFilters({...filters, sort: event.target.value as ListTasksParams['sort']}); setPage(0);}}>
+              <option value="created_desc">Newest first</option><option value="due_asc">Deadline: soonest first</option><option value="due_desc">Deadline: latest first</option>
+              <option value="priority_desc">Priority: high first</option><option value="priority_asc">Priority: low first</option>
+              <option value="status_asc">Status: active first</option><option value="status_desc">Status: completed first</option>
+            </select></label>
+            <button type="button" className="button button-secondary" onClick={() => {setFilters({}); clearSearch();}}>Reset filters</button>
+          </div>
           <div className="list-toolbar">
             <div className="list-heading">
-              <h2>Your tasks</h2>
+              <h2>{view === 'today' ? 'Today and overdue' : view === 'upcoming' ? 'Upcoming tasks' : view === 'completed' ? 'Completed tasks' : 'Your tasks'}</h2>
               {query.data ? (
                 <span className="task-count">
                   {query.data.totalElements}{' '}
@@ -254,6 +304,7 @@ export function TaskFlowPage() {
                       ? 'Try another phrase, or clear your search to see everything.'
                       : 'Add a task when something comes to mind.'}
                   </p>
+                  {Object.values(filters).some(Boolean) || view !== 'all' ? <p>No tasks match this view and all selected filters. Filters intersect; reset filters or choose All Tasks to broaden the results.</p> : null}
                   {normalizedSearch ? (
                     <button
                       type="button"
@@ -278,6 +329,8 @@ export function TaskFlowPage() {
                     tasks={tasks}
                     onEdit={startEdit}
                     onDelete={setDeletingTask}
+                    onStatusChange={setStatusTask}
+                    projects={projectsQuery.data}
                   />
                   {totalPages > 1 ? (
                     <nav className="pagination" aria-label="Task pages">
@@ -312,7 +365,8 @@ export function TaskFlowPage() {
               )}
             </>
           )}
-        </section>
+        </section>}
+        <ProjectManager />
       </section>
 
       <footer className="footer">
@@ -353,9 +407,13 @@ export function TaskFlowPage() {
           }}
           onDeleted={finishDelete}
           onReloaded={setDeletingTask}
-          onRefreshList={async () => !(await query.refetch()).isError}
+          onRefreshList={async () => {
+            await queryClient.invalidateQueries();
+            return !(await query.refetch()).isError;
+          }}
         />
       ) : null}
+      {statusTask ? <StatusTaskDialog task={statusTask} onClose={() => setStatusTask(undefined)} onSaved={(saved) => setAnnouncement(`${saved.status === 'completed' ? 'Completed' : 'Reopened'} “${saved.title}”.`)} /> : null}
     </main>
   );
 }

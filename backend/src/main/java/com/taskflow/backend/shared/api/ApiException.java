@@ -42,6 +42,54 @@ public final class ApiException extends RuntimeException {
     }
 
     /**
+     * Creates a sanitized not-found problem for an absent project.
+     *
+     * @return an HTTP 404 API exception
+     */
+    public static ApiException projectNotFound() {
+        return new ApiException(HttpStatus.NOT_FOUND, "Project not found", "The requested project was not found.", Map.of());
+    }
+
+    /**
+     * Creates a field-specific invalid-project reference problem.
+     *
+     * @return an HTTP 400 API exception
+     */
+    public static ApiException invalidProjectReference() {
+        return new ApiException(
+                HttpStatus.BAD_REQUEST,
+                "Invalid request",
+                "The task references a project that does not exist.",
+                Map.of("projectId", List.of("must identify an existing project")));
+    }
+
+    /**
+     * Creates a case-insensitive duplicate project name conflict.
+     *
+     * @return an HTTP 409 API exception
+     */
+    public static ApiException duplicateProjectName() {
+        return new ApiException(
+                HttpStatus.CONFLICT,
+                "Project name already exists",
+                "Choose a project name that is not already in use.",
+                Map.of("name", List.of("must be unique ignoring case")));
+    }
+
+    /**
+     * Creates the malformed or noncanonical project identifier problem.
+     *
+     * @return an HTTP 400 API exception
+     */
+    public static ApiException invalidProjectId() {
+        return new ApiException(
+                HttpStatus.BAD_REQUEST,
+                "Invalid request",
+                "Project ID must use the canonical 8-4-4-4-12 UUID format.",
+                Map.of("id", List.of("must be a canonical UUID")));
+    }
+
+    /**
      * Creates the required-precondition problem for a missing If-Match header.
      *
      * @return an HTTP 428 API exception
@@ -50,7 +98,7 @@ public final class ApiException extends RuntimeException {
         return new ApiException(
                 HttpStatus.PRECONDITION_REQUIRED,
                 "Precondition required",
-                "Send the latest task ETag in the If-Match header.",
+                "Send the latest resource ETag in the If-Match header.",
                 Map.of());
     }
 
@@ -62,8 +110,8 @@ public final class ApiException extends RuntimeException {
     public static ApiException staleTaskVersion() {
         return new ApiException(
                 HttpStatus.PRECONDITION_FAILED,
-                "Task changed",
-                "The task changed since it was loaded. Reload it before trying again.",
+                "Resource changed",
+                "The resource changed since it was loaded. Reload it before trying again.",
                 Map.of());
     }
 
