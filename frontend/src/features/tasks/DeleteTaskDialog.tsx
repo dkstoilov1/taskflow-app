@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import * as AlertDialog from '@radix-ui/react-alert-dialog';
 import { ApiError, reloadTask } from '../../api/client';
-import type { Task } from '../../api/types';
+import type { Project, Task } from '../../api/types';
+import { TaskDetails } from './TaskDetails';
 import { useDeleteTask } from './useTasks';
 
 type DeleteRecovery = 'reload' | 'refresh';
 
 interface DeleteTaskDialogProps {
   task?: Task;
+  projects?: Project[];
   onOpenChange: (open: boolean) => void;
   onDeleted: (task: Task) => void;
   onReloaded: (task: Task) => void;
@@ -16,6 +18,7 @@ interface DeleteTaskDialogProps {
 
 export function DeleteTaskDialog({
   task,
+  projects,
   onOpenChange,
   onDeleted,
   onReloaded,
@@ -124,9 +127,8 @@ export function DeleteTaskDialog({
           </AlertDialog.Title>
           <AlertDialog.Description className="dialog-intro">
             “{task?.title}” will be permanently removed. This can’t be undone.
-            {' '}Deadline: {task?.dueDate ?? 'None'}; priority: {task?.priority};
-            project: {task?.projectId ?? 'Unassigned'}; status: {task?.status}.
           </AlertDialog.Description>
+          {task ? <TaskDetails task={task} projects={projects} /> : null}
           {error ? (
             <div className="form-error" role="alert">
               <p>{error}</p>

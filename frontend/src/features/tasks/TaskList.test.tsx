@@ -35,6 +35,19 @@ function ApiBackedTaskListHarness() {
 }
 
 describe('TaskList', () => {
+  it('distinguishes completed tasks and priorities without removing their text labels', () => {
+    render(
+      <TaskList
+        tasks={[{ ...TASK, status: 'completed', priority: 'high' }]}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('listitem')).toHaveClass('task-card-completed');
+    expect(screen.getByText('✓ Completed')).toHaveClass('task-status-completed');
+    expect(screen.getByText('high priority')).toHaveClass('task-priority-high');
+  });
+
   it('renders API-backed tasks from the stateful contract mock', async () => {
     const user = userEvent.setup();
     seedMockTasks([{ ...TASK, createdAt: 1 }]);

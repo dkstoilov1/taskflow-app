@@ -2,16 +2,18 @@ import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import * as Dialog from '@radix-ui/react-dialog';
 import { ApiError, getTask } from '../../api/client';
-import type { Task } from '../../api/types';
+import type { Project, Task } from '../../api/types';
+import { TaskDetails } from './TaskDetails';
 import { useChangeTaskStatus } from './useTasks';
 
 interface StatusTaskDialogProps {
   task: Task;
+  projects?: Project[];
   onClose: () => void;
   onSaved: (task: Task) => void;
 }
 
-export function StatusTaskDialog({task, onClose, onSaved}: StatusTaskDialogProps) {
+export function StatusTaskDialog({task, projects, onClose, onSaved}: StatusTaskDialogProps) {
   const client = useQueryClient();
   const [current, setCurrent] = useState(task);
   const [error, setError] = useState('');
@@ -55,10 +57,11 @@ export function StatusTaskDialog({task, onClose, onSaved}: StatusTaskDialogProps
     <Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><Dialog.Content className="confirm-content">
       <Dialog.Title className="dialog-title">{action} this task?</Dialog.Title>
       <Dialog.Description className="dialog-intro">Only status changes. Other fields stay as stored on the server.</Dialog.Description>
-      <p>{current.title} · {current.description || 'No description'}</p>
-      <p>{current.dueDate ?? 'No deadline'} · {current.priority} · {current.projectId ?? 'Unassigned'} · {current.status}</p>
-      {error ? <p role="alert">{error}</p> : null}
-      {blocked && !missing ? <button type="button" onClick={() => void review()} disabled={checking}>{checking ? 'Checking…' : 'Review latest status'}</button> : null}
+      <p className="task-review-title">{current.title}</p>
+      <p className="task-review-description">{current.description || 'No description'}</p>
+      <TaskDetails task={current} projects={projects} />
+      {error ? <p className="form-error" role="alert">{error}</p> : null}
+      {blocked && !missing ? <button type="button" className="text-button" onClick={() => void review()} disabled={checking}>{checking ? 'Checking…' : 'Review latest status'}</button> : null}
       <div className="form-actions">
         <button type="button" className="button button-secondary" onClick={onClose} disabled={mutation.isPending || checking}>Cancel</button>
         <button type="button" className="button button-primary" disabled={blocked || checking || mutation.isPending} onClick={() => void submit()}>

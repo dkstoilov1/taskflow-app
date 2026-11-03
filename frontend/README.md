@@ -63,6 +63,9 @@ Incompatible choices remain selected and show an explanatory empty state.
 Deadline filters are today, overdue and the inclusive Monday–Sunday week
 (including earlier days of that week). Project filtering includes Unassigned.
 Search/view/filter/sort changes reset pagination; Reset filters also clears search.
+On narrow screens (640px and below), the filter and sort controls are collapsed
+behind **Filters & sort**, which shows the number of active filters. Collapsing
+the controls does not clear selections; wider screens always show the controls.
 Sorting supports newest first, due in either direction (undated last), priority
 high/low first, and status active/completed first. The server applies all search,
 filters, ordering, tie-breakers, pagination and totals; the browser never downloads
@@ -80,6 +83,13 @@ and every existing project's completed/total rate rounded to one decimal
 rate. Reopening/deleting removes completion counts; re-completing records a new
 timestamp; editing an already completed task preserves its timestamp. This is
 not an immutable event history.
+
+Task cards use labeled priority/status badges and a muted, struck-through title
+for completed tasks. Dashboard headings share a consistent hierarchy; the
+seven-day completion strip stays on one row on mobile and desktop. Confirmation
+dialogs show labeled metadata and resolve project names from the shared project
+query; an unresolved reference is explicitly labeled **Project unavailable**
+rather than displaying an internal UUID.
 
 Relative-date reads send the browser's IANA timezone, refresh at the next local
 midnight (DST-aware scheduling), and invalidate on focus. Invalid zones surface

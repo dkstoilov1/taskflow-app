@@ -39,15 +39,21 @@ export function Dashboard({timeZone, onNavigate, onEdit, onDelete, onStatusChang
         <p role="alert">Statistics couldn’t load. <button type="button" onClick={() => void statistics.refetch()}>Retry statistics</button></p> :
         <>
           <div className="summary-grid"><p><strong>{statistics.data.completedToday}</strong> completed today</p><p><strong>{statistics.data.completedThisWeek}</strong> completed this week</p></div>
-          <p>Week: {statistics.data.weekStart} – {statistics.data.weekEnd} · {timeZone}</p>
+          <p className="statistics-context">Week: {statistics.data.weekStart} – {statistics.data.weekEnd} · {timeZone}</p>
           <h3>Last seven days</h3>
-          <ol className="daily-stats" aria-label="Daily completions">{statistics.data.dailyCompletions.map((day) => <li key={day.date}><time>{day.date}</time><strong>{day.count}</strong></li>)}</ol>
+          <ol className="daily-stats" aria-label="Daily completions">{statistics.data.dailyCompletions.map((day) => <li key={day.date}>
+            <time dateTime={day.date} aria-label={day.date} title={day.date}>
+              <span>{new Intl.DateTimeFormat(undefined, {weekday: 'short', timeZone: 'UTC'}).format(new Date(`${day.date}T12:00:00Z`))}</span>
+              <span className="daily-date">{Number(day.date.slice(8))}</span>
+            </time>
+            <strong>{day.count}</strong>
+          </li>)}</ol>
           <h3>Project completion</h3>
           {statistics.data.projects.length ? <ul className="project-rates">{statistics.data.projects.map((project) => <li key={project.projectId}>
             <span>{project.name}</span><span>{project.completedTasks}/{project.totalTasks} tasks · {project.completionRate.toFixed(1)}%</span>
             <progress aria-label={`${project.name} completion`} max={100} value={project.completionRate} />
           </li>)}</ul> : <p>No projects yet.</p>}
-          <p className="field-hint">Current completed tasks, not historical events. Reopening or deleting a task removes its completion count.</p>
+          <p className="statistics-note">Current completed tasks, not historical events. Reopening or deleting a task removes its completion count.</p>
         </>}
     </section>
   </section>;

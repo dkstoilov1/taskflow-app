@@ -22,12 +22,12 @@ export function TaskList({
       {tasks.map((task) => {
         const pending = pendingTaskIds.has(task.id);
         return (
-          <li className="task-card" key={task.id}>
+          <li className={`task-card${task.status === 'completed' ? ' task-card-completed' : ''}`} key={task.id}>
             <div className="task-copy">
               <h2>{task.title}</h2>
               <p className="task-metadata">
-                <span>{task.status === 'completed' ? '✓ Completed' : '○ Active'}</span>
-                <span>{task.priority} priority</span>
+                <span className={`task-badge task-status-${task.status}`}>{task.status === 'completed' ? '✓ Completed' : '○ Active'}</span>
+                <span className={`task-badge task-priority-${task.priority}`}>{task.priority} priority</span>
                 <span>{task.dueDate ? `Due ${task.dueDate}` : 'No deadline'}</span>
                 <span>{task.projectId ? projects.find((project) => project.id === task.projectId)?.name ?? 'Project unavailable' : 'Unassigned'}</span>
               </p>

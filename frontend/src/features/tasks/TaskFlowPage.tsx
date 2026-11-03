@@ -24,6 +24,8 @@ export function TaskFlowPage({initialView = 'dashboard'}: {initialView?: TaskVie
   const queryClient = useQueryClient();
   const [view, setView] = useState<TaskView | 'dashboard'>(initialView);
   const [filters, setFilters] = useState<ListTasksParams>({});
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const activeFilterCount = [filters.status, filters.priority, filters.due, filters.project].filter(Boolean).length;
   const projectsQuery = useProjects();
   const timeZone = browserTimeZone();
   useRelativeDateRefresh();
@@ -185,7 +187,18 @@ export function TaskFlowPage({initialView = 'dashboard'}: {initialView?: TaskVie
         </nav>
         {view === 'dashboard' ? <Dashboard timeZone={timeZone} onNavigate={navigate} onEdit={startEdit} onDelete={setDeletingTask} onStatusChange={setStatusTask} /> :
         <section className="task-section" aria-label="Your task list">
-          <div className="filter-toolbar">
+          <button
+            type="button"
+            className="button button-secondary filter-toggle"
+            aria-expanded={filtersOpen}
+            aria-controls="task-filters"
+            onClick={() => setFiltersOpen((open) => !open)}
+          >
+            Filters &amp; sort
+            {activeFilterCount ? <span className="task-count">{activeFilterCount} active</span> : null}
+            <span aria-hidden="true">{filtersOpen ? '−' : '+'}</span>
+          </button>
+          <div id="task-filters" className={`filter-toolbar${filtersOpen ? ' filters-open' : ''}`}>
             <label>Status filter<select value={filters.status ?? ''} onChange={(event) => {setFilters({...filters, status: event.target.value as ListTasksParams['status'] || undefined}); setPage(0);}}>
               <option value="">All statuses</option><option value="active">Active</option><option value="completed">Completed</option>
             </select></label>
@@ -402,6 +415,7 @@ export function TaskFlowPage({initialView = 'dashboard'}: {initialView?: TaskVie
         <DeleteTaskDialog
           key={deletingTask.id}
           task={deletingTask}
+          projects={projectsQuery.data}
           onOpenChange={(open) => {
             if (!open) setDeletingTask(undefined);
           }}
@@ -413,7 +427,7 @@ export function TaskFlowPage({initialView = 'dashboard'}: {initialView?: TaskVie
           }}
         />
       ) : null}
-      {statusTask ? <StatusTaskDialog task={statusTask} onClose={() => setStatusTask(undefined)} onSaved={(saved) => setAnnouncement(`${saved.status === 'completed' ? 'Completed' : 'Reopened'} “${saved.title}”.`)} /> : null}
+      {statusTask ? <StatusTaskDialog task={statusTask} projects={projectsQuery.data} onClose={() => setStatusTask(undefined)} onSaved={(saved) => setAnnouncement(`${saved.status === 'completed' ? 'Completed' : 'Reopened'} “${saved.title}”.`)} /> : null}
     </main>
   );
 }
